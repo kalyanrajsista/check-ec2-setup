@@ -30,9 +30,6 @@
 ### Running the playbook for Rideshare (WIP)
 - Run `ansible-playbook slice-rs.yml -e"env_id=ENV_ID"`
 
-
-# The information below MAY be out of date - Peter K - 08 Jun 2017
-
 *Notes -*
 To automatically create an AMI, specify the instance ID in the host_vars YAML file of the desired environment.
 
