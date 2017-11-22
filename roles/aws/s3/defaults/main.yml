@@ -1,0 +1,31 @@
+---
+s3_website_domain: "airsembly-{{ env_id }}.com"
+cf_domain_name: "www.airsembly-{{ env_id }}.com.s3.amazonaws.com"
+s3_website_region: us-east-1
+s3_website_s3_endpoint: "S3-www.{{ s3_website_domain }}"
+s3_website_directory: ""
+s3_website_index_document: index.html
+s3_website_error_document: error.html
+s3_website_ns_servers_enabled: no
+s3_website_ns_servers: []
+
+s3_website_bucket_policy: |
+  {
+    "Statement": [
+      {
+        "Action": [
+          "s3:GetObject"
+        ],
+        "Effect": "Allow",
+        "Resource": "arn:aws:s3:::www.{{ s3_website_domain }}/*",
+        "Principal": "*"
+      }
+    ]
+  }
+
+#app_name: test
+#server_env: qa
+#aws_access_key: ""
+#aws_secret_key: ""
+#aws_s3:
+#  - bucket_name: ""

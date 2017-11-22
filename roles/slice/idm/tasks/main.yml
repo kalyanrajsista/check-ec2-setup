@@ -1,0 +1,27 @@
+---
+# Install Windows Services
+- name: Create Services folder if needed
+  win_file:
+    path: "{{ services_path }}"
+    state: directory
+  register: folder_info
+  notify: RestartIIS
+
+# Install IIS and sites/APIs
+
+- name: create API folder if needed
+  win_file:
+    path: "{{ api_path }}\\idm"
+    state: directory
+  register: folder_info
+  notify: RestartIIS
+
+#  - debug: msg={{ folder_info }}
+
+#- name: Sanity-check API endpoint
+#  win_uri:
+#    url: http://127.0.0.1/
+#    method: OPTIONS               # change to GET
+#  register: http_output
+
+#- debug: msg={{ http_output }}

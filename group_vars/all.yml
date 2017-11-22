@@ -1,0 +1,29 @@
+ssh_user: None
+
+default_region: us-east-1
+default_remote_region: us-west-2
+
+timestamp: "{{ ansible_date_time.epoch }}"
+azs: "{{ lookup('get_azs', region).split(',')}}"
+az1: "{{ azs[0] }}"
+az2: "{{ azs[1] }}"
+az3: "{{ azs[-1] }}"
+num_azs: "{{ azs | length | int }}"
+available_azs: "{{ azs | unique }}"
+
+public_dns_zone: slice.is
+private_dns_zone: slice.internal
+
+slice_office_cidr: 172.110.77.50/32
+slice_vpn_gw_cidr: 52.71.88.248/32
+
+no_scaling_suspended_processes:
+- Terminate
+- HealthCheck
+- AZRebalance
+- ReplaceUnhealthy
+- Launch
+
+instance_profile_name: Deploy-Slice-Core-EC2
+
+new_version: 1.9.6b

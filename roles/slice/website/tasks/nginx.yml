@@ -1,0 +1,24 @@
+- name: set the nginx config file
+  template: src=nginx.conf.j2 dest=/etc/nginx/sites-available/website.conf
+  notify: restart nginx
+  become: True
+- name: enable the nginx config file
+  file:
+    src: /etc/nginx/sites-available/website.conf
+    dest: /etc/nginx/sites-enabled/website.conf
+    state: link
+  notify: restart nginx
+  become: True
+- name: remove the default nginx config file
+  file: path=/etc/nginx/sites-enabled/default state=absent
+  notify: restart nginx
+  become: True
+- name: create ssl certificates
+  command: >
+    openssl req -new -x509 -nodes -out {{ proj_name }}.crt
+    -keyout {{ proj_name }}.key -subj '/CN={{ domains[0] }}' -days 3650
+    chdir={{ website_conf_path }}
+    creates={{ website_conf_path }}/{{ proj_name }}.crt
+  become: True
+  when: ssl_enabled
+  notify: restart nginx

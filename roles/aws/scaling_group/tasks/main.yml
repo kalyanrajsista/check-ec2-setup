@@ -1,0 +1,203 @@
+---
+- name: Check if ASG exists
+  aws:
+    service: autoscaling
+    method: describe_auto_scaling_groups
+    region: "{{ region }}"
+    params:
+      AutoScalingGroupNames:
+      - "{{ scaling_group.name }}-asg"
+  register: asg_info_exists
+
+- name: "Create {{ scaling_group.ami.name }} AMI from {{ instance_id }}"
+  ec2_ami:
+    state: "{{ state | default('present') }}"
+    region: "{{ region }}"
+    name: "{{ env_id }}-{{ scaling_group.ami.name }}-{{ new_version }}"
+    description: "{{ scaling_group.ami.name }} AMI for {{ scaling_group.name }} version {{ new_version }}"
+    instance_id: "{{ scaling_group.ami.instance_id }}"
+    wait: "{{ scaling_group.ami.wait | default(true) }}"
+  register: ami_out
+  when: instance_id is defined
+
+#- debug:
+#    msg: "{{ ami_out }}"
+
+- name: "Create {{ scaling_group.name }}-lc"
+  ec2_lc:
+    state: "{{ state }}"
+    region: "{{ region }}"
+    assign_public_ip: "{{ scaling_group.launch_config.assign_public_ip }}"
+    name: "{{ scaling_group.name }}-lc-{{ new_version }}"
+    instance_type: "{{ scaling_group.launch_config.instance_type }}"
+    image_id: "{{ ami_out.image_id | default(scaling_group.ami.id) }}"
+    security_groups: "{{ scaling_group.launch_config.security_groups }}"
+    volumes: "{{ scaling_group.launch_config.volumes | default(omit) }}"
+    # spot_price: "{{ instance_bid }}"
+    instance_profile_name: "{{ scaling_group.launch_config.instance_profile_name | default(omit) }}"
+#    user_data: "{{ scaling_group.launch_config.userdata | b64decode }}"
+    key_name: "{{ scaling_group.launch_config.key_name | default(omit) }}"
+    instance_monitoring: "{{ scaling_group.launch_config.instance_monitoring | default(false) }}"
+
+
+- name: "Create {{ scaling_group.name }}-asg"
+  aws:
+    service: autoscaling
+    method: create_auto_scaling_group
+    region: "{{ region }}"
+    params:
+      AutoScalingGroupName:  "{{ scaling_group.name }}-asg"
+      LaunchConfigurationName: "{{ scaling_group.name }}-lc-{{ new_version }}"
+      LoadBalancerNames: "{{ scaling_group.auto_scaling_group.load_balancers | default(omit) }}"
+      MinSize: "{{ scaling_group.auto_scaling_group.min_size }}"
+      MaxSize: "{{ scaling_group.auto_scaling_group.max_size }}"
+      DesiredCapacity: "{{ scaling_group.auto_scaling_group.desired_capacity }}"
+      VPCZoneIdentifier: "{{ scaling_group.auto_scaling_group.vpc_zone_identifier }}"
+      HealthCheckType: "{{ scaling_group.auto_scaling_group.health_check_type | default('ELB') }}"
+      HealthCheckGracePeriod: "{{ scaling_group.auto_scaling_group.health_check_period | default(300) }}"
+#      suspend_processes: "{{ scaling_group.auto_scaling_group.suspend_processes | default(omit) }}"
+      Tags: "{{ scaling_group.auto_scaling_group.tags }}"
+      TargetGroupARNs: "{{ scaling_group.auto_scaling_group.target_groups | default(omit) }}"
+  register: asg_info
+  when: "asg_info_exists.auto_scaling_groups[0] is not defined"
+
+- name: "Update {{ scaling_group.name }}-asg"
+  aws:
+    service: autoscaling
+    method: update_auto_scaling_group
+    region: "{{ region }}"
+    params:
+      AutoScalingGroupName:  "{{ scaling_group.name }}-asg"
+      LaunchConfigurationName: "{{ scaling_group.name }}-lc-{{ new_version }}"
+#      LoadBalancerNames: "{{ scaling_group.auto_scaling_group.load_balancers | default(omit) }}"
+      MinSize: "{{ scaling_group.auto_scaling_group.min_size }}"
+      MaxSize: "{{ scaling_group.auto_scaling_group.max_size }}"
+      DesiredCapacity: "{{ scaling_group.auto_scaling_group.desired_capacity }}"
+      VPCZoneIdentifier: "{{ scaling_group.auto_scaling_group.vpc_zone_identifier }}"
+      HealthCheckType: "{{ scaling_group.auto_scaling_group.health_check_type | default('ELB') }}"
+      HealthCheckGracePeriod: "{{ scaling_group.auto_scaling_group.health_check_period | default(300) }}"
+#      suspend_processes: "{{ scaling_group.auto_scaling_group.suspend_processes | default(omit) }}"
+#      Tags: "{{ scaling_group.auto_scaling_group.tags }}"
+#      TargetGroupARNs: "{{ scaling_group.auto_scaling_group.target_groups }}"
+  register: asg_info
+  when: "asg_info_exists.auto_scaling_groups[0] is defined"
+
+
+#- name: "Suspend processes if required"
+#  aws:
+#    service: autoscaling
+#    method: suspend_processes
+#    region: "{{ region }}"
+#    params:
+#      AutoScalingGroupName:  "{{ scaling_group.name }}-asg"
+#      ScalingProcesses: "{{ scaling_group.auto_scaling_group.suspend_processes | default(omit) }}"
+#  when: "scaling_group.auto_scaling_group.suspend_processes[0] is defined"
+#
+#- name: "Resume suspended processes if required"
+#  aws:
+#    service: autoscaling
+#    method: resume_processes
+#    region: "{{ region }}"
+#    params:
+#      AutoScalingGroupName:  "{{ scaling_group.name }}-asg"
+#      ScalingProcesses: "{{ default_suspended_processes }}"
+#  when: "scaling_group.auto_scaling_group.suspend_processes[0] is not defined"
+
+
+#- name: "Create/Update {{ scaling_group.name }}-asg"
+#  ec2_asg:
+#    state: "{{ state }}"
+#    region: "{{ region }}"
+##    availability_zones: "{{ azs | join(',') }}"
+#    launch_config_name: "{{ scaling_group.name }}-lc-{{ new_version }}"
+#    load_balancers: "{{ scaling_group.auto_scaling_group.load_balancers | default(omit) }}"
+#    name: "{{ scaling_group.name }}-asg"
+#    min_size: "{{ scaling_group.auto_scaling_group.min_size }}"
+#    max_size: "{{ scaling_group.auto_scaling_group.max_size }}"
+#    desired_capacity: "{{ scaling_group.auto_scaling_group.desired_capacity }}"
+#    vpc_zone_identifier: "{{ scaling_group.auto_scaling_group.vpc_zone_identifier }}"
+#    health_check_type: "{{ scaling_group.auto_scaling_group.health_check_type | default('ELB') }}"
+#    health_check_period: "{{ scaling_group.auto_scaling_group.health_check_period | default(300) }}"
+#    replace_all_instances: "{{ scaling_group.auto_scaling_group.replace_all_instances | default(false) }}"
+#    replace_batch_size: "{{ scaling_group.auto_scaling_group.replace_batch_size | default(omit) }}"
+#    replace_instances: "{{ scaling_group.auto_scaling_group.replace_instances | default(omit) }}"
+#    suspend_processes: "{{ scaling_group.auto_scaling_group.suspend_processes | default(omit) }}"
+#    tags: "{{ scaling_group.auto_scaling_group.tags }}"
+#  register: asg_info
+#  #TODO: The ec2_asg module fails when ASG is currently attached to a Target Group (TG) hence the following line.
+##  failed_when: "{{ 'msg' in asg_info and 'AutoScalingGroup name not found' not in asg_info.module_stderr }}"
+##  ignore_errors: yes
+#
+##TODO: Once ec2_asg is capable of handling TG associations, this step can be removed
+#- name: "Attach {{ scaling_group.name }}-tg to ALB TG"
+#  aws:
+#    service: autoscaling
+#    method: attach_load_balancer_target_groups
+#    region: "{{ region }}"
+#    params:
+#      AutoScalingGroupName:  "{{ scaling_group.name }}-asg"
+#      TargetGroupARNs: "{{ scaling_group.auto_scaling_group.target_groups }}"
+#  when: scaling_group.auto_scaling_group.target_groups is defined
+
+
+- name: "Create/Update {{ scaling_group.name }}-policy"
+  ec2_scaling_policy:
+    state: "{{ state }}"
+    region: "{{ region }}"
+    name: "{{ item.name }}"
+    asg_name: "{{ scaling_group.name }}-asg"
+    adjustment_type: "{{ item.adjustment_type }}"
+    min_adjustment_step: "{{ item.min_adjustment_step }}"
+    scaling_adjustment: "{{ item.scaling_adjustment }}"
+    cooldown: "{{ item.cooldown }}"
+  with_items:
+    - name: "Increase Group Size"
+      adjustment_type: "ChangeInCapacity"
+      scaling_adjustment: "{{ scaling_group.policies.scale_up.scaling_adjustment | default(+1) }}"
+      min_adjustment_step: "{{ scaling_group.policies.scale_up.min_adjustment_step | default(1) }}"
+      cooldown: "{{ scaling_group.policies.scale_up.cooldown | default(60) }}"
+    - name: "Decrease Group Size"
+      adjustment_type: "ChangeInCapacity"
+      scaling_adjustment: "{{ scaling_group.policies.scale_down.scaling_adjustment | default(-1) }}"
+      min_adjustment_step: "{{ scaling_group.policies.scale_down.min_adjustment_step | default(1) }}"
+      cooldown: "{{ scaling_group.policies.scale_down.cooldown | default(180) }}"
+  register: autoscale_policy
+  when: "'policies' in scaling_group"
+
+
+- name: "Create/Update Autoscaling Alarm | High CPU | {{ scaling_group.name  }}"
+  ec2_metric_alarm:
+    state: "{{ state }}"
+    region: "{{ region }}"
+    name: "{{ scaling_group.name }}-scale-up"
+    metric: "{{ scaling_group.policies.scale_up.metric | default(CPUUtilization) }}"
+    statistic: "{{ scaling_group.policies.scale_up.statistic | default(Average) }}"
+    unit: "{{ scaling_group.policies.scale_up.unit | default(Percent) }}"
+    comparison: "{{ scaling_group.policies.scale_up.comparison | default('>=') }}"
+    threshold: "{{ scaling_group.policies.scale_up.threshold | default(70.0) }}"
+    evaluation_periods: "{{ scaling_group.policies.scale_up.evaluation_periods | default(5) }}"
+    period: "{{ scaling_group.policies.scale_up.period | default(60) }}"
+    namespace: "{{ scaling_group.policies.scale_up.namespace | default('AWS/EC2') }}"
+    alarm_actions: "{{ autoscale_policy.results[0].arn }}"
+    dimensions:
+      AutoScalingGroupName: "{{ scaling_group.name }}-asg"
+  when: "'policies' in scaling_group"
+
+
+- name: "Create/Update Autoscaling Alarm | Low CPU | {{ scaling_group.name }}"
+  ec2_metric_alarm:
+    state: "{{ state }}"
+    region: "{{ region }}"
+    name: "{{ scaling_group.name }}-scale-down"
+    metric: "{{ scaling_group.policies.scale_down.metric | default(CPUUtilization) }}"
+    statistic: "{{ scaling_group.policies.scale_down.statistic | default(Average) }}"
+    unit: "{{ scaling_group.policies.scale_down.unit | default(Percent) }}"
+    comparison: "{{ scaling_group.policies.scale_down.comparison | default('<=') }}"
+    threshold: "{{ scaling_group.policies.scale_down.threshold | default(30.0) }}"
+    evaluation_periods: "{{ scaling_group.policies.scale_down.evaluation_periods | default(5) }}"
+    period: "{{ scaling_group.policies.scale_down.period | default(60) }}"
+    namespace: "{{ scaling_group.policies.scale_down.namespace | default('AWS/EC2') }}"
+    alarm_actions: "{{ autoscale_policy.results[1].arn }}"
+    dimensions:
+      AutoScalingGroupName: "{{ scaling_group.name }}-asg"
+  when: "'policies' in scaling_group"

@@ -1,0 +1,125 @@
+---
+######   PLAY 1  #######
+
+- name: Create/Update Slice Product Infrastructure
+  vars:
+    state: present
+    env_id: none
+  vars_files:
+  - secrets.yml
+  hosts: "product_infrastructure:&{{ env_id }}"
+  gather_facts: false
+
+  pre_tasks:
+  - name: Availability zones used for region {{ region }}, {{ env_id }} environment.
+    debug: msg="{{ num_azs }} - {{ available_azs }} "
+
+  - name: Get security VPC facts
+    ec2_vpc_net_facts:
+      region: "{{ region }}"
+      aws_access_key: "{{ aws.slice.access_key}}"
+      aws_secret_key: "{{ aws.slice.secret_key}}"
+      filters:
+        cidr: "{{ access_vpc_cidr }}"
+    register: security_vpc_info
+
+##  - debug: msg={{ security_vpc_info }}
+#
+  - set_fact: access_vpc_id={{ security_vpc_info.vpcs[0].id }}
+
+  roles:
+  - role: aws/vpc
+    vpc_net: "{{ main_vpc_net }}"
+    vpc_pcx: "{{ main_vpc_peers }}"
+    vpc_nat: "{{ main_vpc_nat }}"
+    vpc_rtb: "{{ all_vpc_routing_tables }}"
+
+  - role: aws/s3
+    aws_s3: "{{ application_buckets }}"
+
+  - role: aws/sgx
+  - role: aws/elb
+
+  - role: aws/alb
+    alb: "{{ internal_services_lb }}"
+
+  - role: aws/alb
+    alb: "{{ public_services_lb }}"
+
+
+######   PLAY 2  #######
+
+- name: 2 - Configure role images
+  hosts: image_builder:&{{ env_id }}
+  gather_facts: false
+  vars_files:
+    - secrets.yml
+  roles:
+    - role: aws/image_builder
+      image_specs: "{{ instance_roles }}"
+
+- name: 3 - Configure Product Image
+  hosts: product:&{{ env_id }}
+  gather_facts: false
+  vars_files:
+    - secrets.yml
+  roles:
+    - role: slice/product
+
+- name: 4 - Configure IDM Image
+  hosts: idm:&{{ env_id }}
+  gather_facts: true
+  vars_files:
+  - secrets.yml
+  roles:
+  - role: slice/idm
+
+- name: 5 - Cteate AMIs for each role
+  hosts: "product_infrastructure:&{{ env_id }}"
+  gather_facts: false
+  vars:
+    state: present
+  vars_files:
+  - secrets.yml
+  roles:
+  - role: aws/image_creator
+    scaling_group: "{{ product_scaling_group }}"
+
+####   Scale
+- name: 6 - Deploy AMIs for each role ASG
+  hosts: "product_infrastructure:&{{ env_id }}"
+  gather_facts: false
+  vars:
+    state: present
+  vars_files:
+  - secrets.yml
+  roles:
+  - role: aws/scaling_group
+    scaling_group: "{{ product_scaling_group }}"
+
+#  - role: aws/scaling_group
+#    scaling_group: "{{ idm_scaling_group }}"
+#
+#  - role: aws/scaling_group
+#    scaling_group: "{{ uw_services_scaling_group }}"
+#
+#  - role: aws/scaling_group
+#    scaling_group: "{{ product_web_scaling_group }}"
+#
+#  - role: aws/scaling_group
+#    scaling_group: "{{ eventstore_scaling_group }}"
+#
+#  - role: aws/scaling_group
+#    scaling_group: "{{ claims_scaling_group }}"
+#
+#  - role: aws/scaling_group
+#    scaling_group: "{{ claims_web_scaling_group }}"
+#
+#  - role: aws/scaling_group
+#    scaling_group: "{{ notifications_scaling_group }}"
+
+#  - role: aws/scaling_group
+#    scaling_group: "{{ website_scaling_group }}"
+
+#  post_tasks:
+#     - name: ELB URL

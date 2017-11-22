@@ -1,0 +1,10 @@
+---
+- name: ensure ntp installed
+  yum: name=ntp state=latest
+  notify:
+  - restart ntpd
+  become: true
+- name: ensure ntpd started
+  service: name=ntpd enabled=yes state=started
+  become: true
+...

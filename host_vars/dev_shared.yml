@@ -1,0 +1,27 @@
+---
+ansible_connection: local
+ansible_python_interpreter: python
+
+env_name: DEV-SHARED
+env_type: dev
+
+region: us-east-1
+vpc_cdir: 10.50.0.0/16
+access_vpc_cidr: 172.25.0.0/16
+
+restricted_access: true
+detailed_monitoring: false
+autoscaling: false
+
+vpc_public_subnets: ['10.50.0.0/21', '10.50.8.0/21']
+vpc_private_subnets: ['10.50.192.0/19', '10.50.224.0/19']
+vpc_db_subnets: ['10.50.16.0/21', '10.50.32.0/21']
+
+registry_ami: ami-80861296
+registry_instance_type: t2.small
+registry_inst_min: 1
+registry_inst_max: 1
+registry_keypair: nexus
+
+
+#ssl_certificate_arn: "arn:aws:acm:us-east-2:516087258462:certificate/fa004f29-0092-4d7d-9e30-c69d95550fa1"    # May 2017

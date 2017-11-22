@@ -1,0 +1,15 @@
+---
+- name: Create new nat gateway and allocate new EIP if a nat gateway does not yet exist in the subnet.
+  ec2_vpc_nat_gateway:
+    state: present
+    region: "{{ vpc_nat.region | default(region) }}"
+    subnet_id: "{{ item }}"
+    wait: "{{ vpc_nat.wait | default('yes') }}"
+    if_exist_do_not_create: "{{ vpc_nat.if_exist_do_not_create | default('yes') }}"
+  register: vpc_nat_info
+  with_items: "{{ vpc_nat.subnet_ids }}"
+  when: vpc_nat.subnet_ids is defined
+
+#- debug: msg={{ vpc_nat_info }}
+
+

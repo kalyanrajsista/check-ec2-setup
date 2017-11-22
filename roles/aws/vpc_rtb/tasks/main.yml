@@ -1,0 +1,36 @@
+---
+# TODO: Needs reworking to make idempotent. Currently a nat route, if defined, will be deleted by the first step and recreated by the second.
+- name: Create VPC Routing Tables
+  ec2_vpc_route_table:
+    vpc_id: "{{ item.vpc_id | default(vpc_id) }}"
+    region: "{{ item.vpc_region | default(region) }}"
+    subnets: "{{ item.subnets  | default(omit)}}"
+    routes: "{{ item.routes }}"
+    purge_subnets:  "{{ item.purge_subnets | default('yes')}}"
+    purge_routes: "{{ item.purge_routes | default('yes')}}"
+    tags: "{{ item.tags }}"
+    lookup: "{{ item.lookup | default('tag') }}"
+  register: vpc_rtb_info
+  with_items: "{{ vpc_rtb }}"
+  when: vpc_rtb[0] is defined
+
+- debug:
+    msg: "{{ vpc_rtb_info }}"
+
+# The following is a hack since the current ec2_vpc_route_table module does not support NatGatewayId as a parameter.
+# Consequently the boto3 aws module is used to create these routes.
+- name: Create routes for NAT gateway
+  aws:
+    service: ec2
+    method: create_route
+    region: "{{ region }}"
+    params:
+      RouteTableId: "{{ vpc_rtb_info.results | selectattr('item.tags.AZ', 'equalto', item.tags.AZ) | map(attribute='route_table.id') | join }}"
+      DestinationCidrBlock: "{{ item.nat_route.dest }}"
+      NatGatewayId: "{{ item.nat_route.nat_gateway_id }}"
+  failed_when: "'msg' in route_result and 'already exists' not in route_result.msg"
+  register: route_result
+  with_items: "{{ vpc_rtb }}"
+  when: vpc_rtb[0] is defined and item.nat_route is defined
+
+

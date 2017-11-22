@@ -1,0 +1,19 @@
+# files
+
+*.pyc
+
+# PyCharm stuff:
+.idea/
+
+# Mac OS/X stuff:
+.DS_Store
+
+
+# Ansible stuff
+secrets.yml
+*.retry
+
+
+# virtualenv
+
+/venv/*

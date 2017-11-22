@@ -1,0 +1,63 @@
+---
+#- debug:
+#    msg: "{{ lambda_functions }}"
+
+- name: Create temporary build directory
+  tempfile:
+    state: directory
+    suffix: build
+  register: temp_dir
+
+#- debug:
+#    msg: "{{ temp_dir.path }}"
+
+- pip:
+    requirements: "{{ item.project_path }}/{{ item.name }}/requirements/aws.txt"
+    virtualenv: "{{ temp_dir.path }}/{{ item.name }}"
+  with_items: "{{ lambda_functions }}"
+
+- copy:
+    src: "{{ item.project_path }}/{{ item.name }}/function.py"
+    dest: "{{ temp_dir.path }}/{{ item.name }}/lib/python2.7/site-packages/"
+  with_items: "{{ lambda_functions }}"
+
+#- file:
+#    path: "{{ item.project_path }}/{{ item.name }}/.DS_Store"
+#    state: absent
+#  with_items: "{{ lambda_functions }}"
+
+- name: "Archive Lambda Packages"
+  archive:
+    path:
+    - "{{ temp_dir.path }}/{{ item.name }}/lib/python2.7/site-packages/"
+    dest: "{{ item.project_path }}/{{ item.name }}.zip"
+    format: zip
+  with_items: "{{ lambda_functions }}"
+
+- name: "Create/Update Lambda Functions"
+  lambda:
+    state: "{{ state | default('present') }}"
+    name: "{{ item.name }}"
+    publish: "{{ item.publish | default(false) }}"
+    description: "{{ item.description | default(item.name) }}"
+    code_s3_bucket: "{{ item.code_s3_bucket | default(default_lambda_bucket) }}"
+    code_s3_key: "{{ item.code_s3_key }}"
+    local_path: "{{ item.project_path }}/{{ item.name }}.zip"
+    runtime: "{{ item.runtime }}"
+    timeout: "{{ item.timeout | default(5) }}"
+    handler: "{{ item.handler }}"
+    memory_size: "{{ item.memory_size | default(128) }}"
+    role: "{{ item.role }}"
+    version: "{{ item.version | default(omit) }}"
+    env_variables: "{{ item.env_variables | default(omit) }}"
+    vpc_subnet_ids: "{{ item.vpc_subnet_ids | default(omit) }}"
+    vpc_security_group_ids: "{{ item.vpc_security_group_ids | default(omit) }}"
+
+  register: lambda_out
+  with_items: "{{ lambda_functions }}"
+
+#  when: instance_id is defined
+
+#- debug:
+#    msg: "{{ ami_out }}"
+

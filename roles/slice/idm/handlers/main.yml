@@ -1,0 +1,6 @@
+---
+- name: RestartIIS
+  win_iis_website:
+    name: "Default Web Site"
+    state: restarted
+    physical_path: "{{ api_path }}"

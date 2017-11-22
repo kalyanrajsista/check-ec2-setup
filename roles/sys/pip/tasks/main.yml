@@ -1,0 +1,8 @@
+---
+- name: Install pip and virtualenv
+  yum: name="{{ item }}" state=latest
+  with_items:
+  - python-pip
+  - python-virtualenv
+  become: true
+...

@@ -1,0 +1,72 @@
+---
+#- name: Get the ubuntu trusty AMI by default is no base_ami defined
+#  ec2_ami_find:
+#    name: "Ubuntu Server 16.04 LTS (HVM*"
+#    virtualization_type: hvm
+#    region: "{{ region }}"
+#    no_result_action: fail
+#  register: ami_found
+#  when: base_ami is undefined
+#
+#- set_fact: base_ami={{ ami_found.results[0].ami_id }}
+#  when: base_ami is undefined
+
+- name: Start the Image instance(s)
+  ec2:
+    image: "{{ item.ami }}"
+    region: "{{ region }}"
+    instance_type: "{{ item.instance_type | default('t2.small') }}"
+    assign_public_ip: "{{ item.assign_public_ip | default(false) }}"
+    instance_profile_name: "{{ item.instance_profile_name | default(omit) }}"
+    key_name: "{{ item.key_name | default(omit) }}"
+    count_tag:
+      Image: "{{ item.name }}"
+    group:
+    - "{{ env_id }}-ops-access"
+    exact_count: 1
+    instance_tags:
+      Name: "{{ env_name }} {{ item.name }} ** Image **"
+      Application: Image Builder
+      Network: Private
+      Environment: "{{ env_name }}"
+      Image: "{{ item.name }}"
+    vpc_subnet_id: "{{ image_building_subnet }}"
+    wait: "{{ item.wait | default('true') }}"
+  register: image_instances
+  with_items: "{{ image_specs }}"
+
+- debug:
+    msg: "image_instances = {{ image_instances }}"
+
+- name: add the instance(s) to group(s)
+  add_host:
+    hostname: "{{ item.tagged_instances[0].private_ip }}"
+#    ansible_connection: winrm
+#    ansible_winrm_transport: plaintext
+#    ansible_winrm_server_cert_validation: ignore
+#    ansible_winrm_scheme: http
+    groups: "image_builder,{{ env_id }},{{ item.item.name }}"
+  with_items: "{{ image_instances.results }}"
+  when: item.tagged_instances[0].private_dns_name is defined and item.invocation.module_args.wait # and ec2.changed
+
+
+#- name: set the instance ID
+#  set_fact: instance_id={{ ec2.instance_ids[0] }}
+
+
+#- name: set new ec2 instance
+#  set_fact:
+#    ami_instance: '{{ ec2.instances[0] }}'
+#- debug:
+#    msg: temporary instance id is {{ ami_instance.id }}
+#- name: set new host ip
+#  set_fact:
+#    ansible_host: '{{ ami_instance.private_ip }}'
+#- debug:
+#    msg: ip address is {{ ansible_host }}
+
+#- name: wait for ssh server to be running
+#  wait_for: host={{ item.private_dns_name }} port=22 search_regex=OpenSSH
+#  with_items: "{{ ec2.instances }}"
+#  when: item.private_dns_name is defined and image_specs.wait
+

@@ -1,0 +1,15 @@
+---
+- name: install apt packages
+  apt: pkg={{ item }} update_cache=yes cache_valid_time=3600
+  become: True
+  with_items:
+    - git
+    - libjpeg-dev
+    - libpq-dev
+#    - memcached
+    - nginx
+#    - python-dev
+#    - python-pip
+    - libmysqlclient-dev
+    - supervisor
+- include: nginx.yml

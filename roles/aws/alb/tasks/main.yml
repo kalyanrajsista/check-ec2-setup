@@ -1,0 +1,50 @@
+---
+- name: Create Application Load Balancer (ELBv2)
+  aws:
+    service: elbv2
+    method: create_load_balancer
+    region: "{{ region }}"
+    params:
+      Name: "{{ alb.name }}"
+      Subnets: "{{ alb.subnets }}"
+      SecurityGroups: "{{ alb.security_groups }}"
+      Scheme: "{{ alb.scheme | default('internet-facing') }}"    # 'internet-facing'|'internal'
+      Tags: "{{ alb.tags | default(omit) }}"
+      IpAddressType: "{{ alb.ip_address_type | default('ipv4') }}"   # 'ipv4'|'dualstack'
+  register: alb_info
+  changed_when: alb_info.load_balancers[0].state.code != 'active'
+
+#- debug:
+#    msg: "{{ alb_info }}"
+#
+
+- include: listener.yml
+  with_items: "{{ alb.listeners }}"
+  loop_control:
+    loop_var: listener_item
+
+- name: Get target group info
+  aws:
+    service: elbv2
+    method: describe_target_groups
+    region: "{{ region }}"
+    # params:
+    #   Name: "{{ item.target_group.name }}"
+  register: target_group_info
+
+- name: "Create/Update Route53 Record | {{ alb.dns.host_name }}.{{ alb.dns.zone }}"
+  route53:
+    command: create
+    overwrite: "{{ alb.dns.overwrite | default('true') }}"
+    zone: "{{ alb.dns.zone }}"
+    private_zone: "{{ alb.dns.private_zone | default('false') }}"
+    record: "{{ alb.dns.host_name }}.{{ alb.dns.zone }}"
+    type: "{{ alb.dns.type | default('A') }}"
+    alias: "{{ alb.dns.alias | default('false') }}"
+    alias_hosted_zone_id: "{{ alb.dns.alias_hosted_zone_id | default(omit) }}"
+    value: "{{ alb_info.load_balancers[0].dns_name }}"
+    ttl: "{{ alb.dns.ttl | default(3600) }}"
+    vpc_id: "{{ alb.dns.vpc_id | default(omit) }}"
+  when: "alb.dns is defined"
+#  tags:
+#    - dns

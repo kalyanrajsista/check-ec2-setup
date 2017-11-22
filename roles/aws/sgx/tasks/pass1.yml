@@ -1,0 +1,22 @@
+- name: Create Security group with xrefs (pass 1)
+  ec2_group:
+    name: "{{ item.sg_name | default('my_sg') }}"
+    description: "{{ item.sg_description | default('My Security Group') }}"
+    state: "{{ item.sg_state | default('present') }}"
+    region: "{{ item.sg_region | default(omit) }}"
+    vpc_id: "{{ item.sg_vpc_id | default(omit) }}"
+#    purge_rules: "{{ item.sg_purge_rules | default(false) }}"
+#    purge_rules_egress: "{{ item.sg_purge_rules_egress | default(false) }}"
+    purge_rules: false
+    purge_rules_egress: false
+
+  register: sg_init
+  with_items: "{{ sg_list }}"
+
+- name: Add tags to Security Group (since ec2_group module doesn't support it)
+  ec2_tag:
+    resource: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', item.sg_name) | map(attribute='group_id') | join() }}"
+    region: "{{ item.sg_region | default(omit) }}"
+    state: "{{ item.sg_state | default('present') }}"
+    tags: "{{ item.sg_resource_tags | default(omit) }}"
+  with_items: "{{ sg_list }}"

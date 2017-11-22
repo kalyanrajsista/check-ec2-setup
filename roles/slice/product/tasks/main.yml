@@ -1,0 +1,139 @@
+---
+# Install Windows Services
+- name: Create Services folder if needed
+  win_file:
+    path: "{{ services_path }}"
+    state: directory
+  register: folder_info
+
+#- name: GET HSS artifact but dont download if the file checksums match.
+#  s3:
+#    bucket: 1-ops
+#    object: /{{ env_id }}/homeshare/slice-hs-services.zip
+#    dest: ./slice-hs-services.zip
+#    mode: get
+#    overwrite: different
+#  delegate_to: localhost
+#
+#- name: Copy zip file to remote host
+#  win_copy:
+#    src: ./slice-hs-services.zip
+#    dest: "{{ services_path }}"
+#
+#
+#- name: Recursively decompress ZIP file
+#  win_unzip:
+#    src: "{{ services_path }}\\slice-hs-services.zip"
+#    dest: "{{ hs_service_path }}"
+#    recurse: true
+#    rm: false
+
+# Use simple command module since services module will not work.
+#- name: Install Homeshare service
+##    win_service:
+##      name: Slice.Homeshare.Services.Builder
+##      path: "{{ hs_service_path }}\\bin\\Release\\Slice.Homeshare.Services.Builder.exe"
+##      display_name: Slice Homeshare Builder
+##      description: Slice Homeshare Builder Generator
+##      start_mode: auto
+##      state: restarted
+#  win_command: "{{ hs_service_path }}\\bin\\Release\\Slice.Homeshare.Services.Builder.exe install"
+#
+
+# Install IIS and sites/APIs
+
+- name: create API folder if needed
+  win_file:
+    path: "{{ api_path }}\\hsint"
+    state: directory
+  register: folder_info
+
+#  - debug: msg={{ folder_info }}
+
+- name: Configure IIS site
+  win_iis_website:
+    name: "Default Web Site"
+    state: started
+    port: 80
+    ip: "*"
+#      hostname: slice-api.local
+    application_pool: "DefaultAppPool"
+    physical_path: "{{ api_path }}"
+#      parameters: logfile.directory:c:\sites\logs
+  register: website
+#
+#  - debug: msg={{ website }}
+
+#- name: GET HS API artifact but dont download if the file checksums match.
+#  s3:
+#    bucket: 1-ops
+#    object: /{{ env_id }}/homeshare/hs-api.zip
+#    dest: ./hs-api.zip
+#    mode: get
+#    overwrite: different
+#  delegate_to: localhost
+#
+#- name: Copy local ZIP file to remote host
+#  win_copy:
+#    src: ./hs-api.zip
+#    dest: c:\Users\Administrator\Downloads\
+#
+#- name: Recursively decompress ZIP file
+#  win_unzip:
+#    src: c:\Users\Administrator\Downloads\hs-api.zip
+#    dest: "{{ api_path }}"
+#    recurse: true
+#    rm: false
+
+
+- name: Add hsint webapplication on IIS.
+  win_iis_webapplication:
+    name: hsint
+    site: "Default Web Site"
+    state: present
+    physical_path: C:\inetpub\wwwroot\hsint
+
+#- name: GET HS internal API artifact but dont download if the file checksums match.
+#  s3:
+#    bucket: 1-ops
+#    object: /{{ env_id }}/homeshare/hs-api-internal.zip
+#    dest: ./hs-api-internal.zip
+#    mode: get
+#    overwrite: different
+#  delegate_to: localhost
+#
+#- name: Copy local ZIP file to remote host
+#  win_copy:
+#    src: ./hs-api-internal.zip
+#    dest: c:\Users\Administrator\Downloads\
+#
+#- name: Recursively decompress ZIP file
+#  win_unzip:
+#    src: c:\Users\Administrator\Downloads\hs-api-internal.zip
+#    dest: "{{ api_path }}\\hsint"
+#    recurse: true
+#    rm: false
+
+
+#  - name: Create a virtual directory if it does not exist
+#    win_iis_virtualdirectory:
+#      name: hsint
+#      site: Default Web Site
+#      state: present
+#      physical_path: c:\inetpub\wwwroot\hsint
+
+#  - name: Add or update registry
+#    win_regedit:
+#      path: HKLM:\SYSTEM\CurrentControlSet\Services\EventLog
+#      name: hello
+#      data: 1337
+#      type: dword
+
+
+#- name: Sanity-check API endpoint
+#  win_uri:
+#    url: http://127.0.0.1/
+#    method: GET
+#  register: http_output
+#
+#- debug: msg={{ http_output }}

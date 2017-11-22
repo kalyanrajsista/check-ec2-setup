@@ -1,0 +1,6 @@
+---
+- name: install awscli and boto3
+  pip: name={{ item }} state=latest
+  with_items:
+  - awscli
+  - boto3

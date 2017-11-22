@@ -1,0 +1,61 @@
+---
+- name: Install AWSCLI
+  pip: name=awscli state=latest
+
+- name: Configure AWS.
+  shell: aws configure set {{ item.key }} {{ item.value }} --profile {{ aws.slice.aws_profile }}
+  no_log: True
+  with_dict:
+    aws_access_key_id: "{{ aws.slice.access_key }}"
+    aws_secret_access_key: "{{ aws.slice.secret_key }}"
+    region: "{{ region }}"
+    format: "{{ aws.slice.aws_format }}"
+  become_user: "{{ aws.slice.aws_system_user }}"
+  changed_when: false
+
+- include: s3.yml
+- include: cloudfront.yml
+#- include: route53.yml
+
+#- name: Create S3 Bucket for Portal and Documentation
+#  local_action:
+#    module: s3
+#    region: "{{ region }}"
+#    bucket: "{{ item.bucket_name }}"
+#    object: "{{ item.object | default(omit) }}"
+#    mode: create
+#  with_items:
+#    - "{{ aws_s3 }}"
+
+#- name: Install AWSCLI
+#  pip: name=awscli state=present
+#
+#- name: Create AWSCLI credentials
+#  file: path=~/.aws owner={{ ansible_env.USER }} state=directory
+#
+#- name: Create template
+#  template: src=aws_config.j2 dest=~/.aws/config owner={{ ansible_env.USER }} backup=yes
+#
+#- name: Copy CORS Config to tmp directory
+#  copy: src=cors-config.json dest=/tmp/
+#
+#- name: Create cors policies
+#  command: "aws s3api put-bucket-cors --bucket {{ item.bucket_name }} --cors-configuration file:///tmp/cors-config.json --profile {{ app_name }}"
+#  with_items:
+#    - "{{ aws_s3 }}"
+#
+#- name: create policy config to tmp directory
+#  template: src=policy-config.json.j2 dest=/tmp/{{ item.bucket_name }}.json
+#  with_items:
+#    - "{{ aws_s3 }}"
+#
+#- name: Create bucket policy json files
+#  command: "aws s3api put-bucket-policy --bucket {{ item.bucket_name }} --policy file:///tmp/{{ item.bucket_name }}.json --profile {{ app_name }}"
+#  with_items:
+#    - "{{ aws_s3 }}"
+#
+#- name: Enable versioning
+#  command: "aws s3api put-bucket-versioning --bucket {{ item.bucket_name }} --versioning-configuration MFADelete=Disabled,Status=Enabled --profile {{ app_name }}"
+#  with_items:
+#    - "{{ aws_s3 }}"
+#  when: server_env == "production"

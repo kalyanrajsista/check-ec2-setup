@@ -1,0 +1,8 @@
+---
+- name: ensure bind installed
+  yum: name=bind state=latest
+  notify:
+  - restart bind
+- name: ensure bind enabled and started
+  service: name=named enabled=yes state=started
+...

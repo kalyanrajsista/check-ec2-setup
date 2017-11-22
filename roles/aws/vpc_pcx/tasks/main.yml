@@ -1,0 +1,26 @@
+---
+# Create and accept a local peering connection.
+- name: Create local account VPC peering Connection
+  ec2_vpc_peer:
+    region: "{{ region }}"
+    vpc_id: "{{ vpc_id }}"
+    peer_vpc_id: "{{ item.vpc_id }}"
+    state: "{{ item.state }}"
+    tags: "{{ item.tags }}"
+  register: peer_info
+  with_items: "{{ vpc_pcx }}"
+  when: vpc_pcx[0] is defined
+
+#- debug:
+#    msg: "{{peer_info}}"
+#
+
+- name: Accept local VPC peering request
+  ec2_vpc_peer:
+    region: "{{ region }}"
+    peering_id: "{{ item.peering_id }}"
+    state: accept
+    tags: "{{ item.item.tags }}"
+  register: action_peer
+  with_items: "{{ peer_info.results }}"
+  when: vpc_pcx[0] is defined

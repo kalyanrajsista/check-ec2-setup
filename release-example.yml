@@ -1,0 +1,137 @@
+---
+#  This Playbbook consists of 3 plays.  The first play makes sure the environment is built properly and launches
+#  an "image builder" instance.  Play 2 configures the instance for it's role (in this case, a Mezzanine CMS system).
+#  Once the instance is fully configured, Play 3 starts by creating an AMI from the previously configured instance.
+#  Then a rolling update is executed after which the "image builder" instance is terminated.
+
+
+######   PLAY 1  #######
+
+- name: 1 - Build new image -- Mezzanine Release
+  gather_facts: true
+  vars:
+     state: present
+     azs: "{{ lookup('get_azs', region).split(',')}}"
+     az1: "{{ azs[0] }}"
+     az2: "{{ azs[1] }}"
+     az3: "{{ azs[-1] }}"
+     num_azs: "{{ azs | length | int }}"
+     available_azs: "{{ azs | unique }}"
+     env_id: none
+     success: false
+     completed_message: |
+         The Mezzanine build has completed.
+         For build details, go to
+         https://console.aws.amazon.com/cloudwatch/home?region={{ region }}#logStream:group=/aws/codebuild/MediabyteCMSBuild in Amazon CloudWatch Logs.
+  vars_files:
+    - secrets.yml
+  hosts: "infrastructure:&{{ env_id }}"
+
+  pre_tasks:
+     - name: Get public (gateway) IP address              # required when running deployment from a container
+       ipify_facts:
+
+     - name: Get latest version tag (semver formatted) from repo
+       shell: git fetch && git tag -l
+       register: git_out
+     - set_fact: version={{ git_out.stdout_lines[-1] }}
+
+     - name: Availability zones used for region {{ region }}, {{ env_id }} environment.
+       debug: msg="{{ num_azs }} - {{ available_azs }} from {{ ipify_public_ip }}"
+     - name: Send notification message via Slack
+       slack:
+         token: "{{ slack_token }}"
+         msg: "Starting Mezzanine {{ version }} deployment (from {{ ipify_public_ip }}) ..."
+         color: warning
+         username: "{{ env_name }} Agent (via {{ ansible_user }})"
+
+     - set_fact: success=false
+
+  roles:
+    - role: aws/vpc
+      vpc: "{{  main_vpc }}"
+    - role: aws/rds
+    - role: aws/sgx
+    - role: aws/elb
+    - role: aws/s3
+      s3_buckets: "{{ mezza_buckets }}"
+
+    - role: aws/image_builder                               # Note image builder role
+      image_specs: "{{ mezza_image_specs }}"
+
+  post_tasks:
+  - set_fact: success=true
+
+
+######   PLAY 2  #######
+
+- name: 2 - Configure Mezzanine image instance
+  hosts: image_builders:&{{ env_id }}                       # Note hosts selection here compared with that in Play 1
+  gather_facts: true
+  vars_files:
+    - secrets.yml
+  roles:
+    - role: mezzanine
+      site: "{{ mezza_sites.ivcs }}"
+      http_auth: True
+
+    - role: mezzanine
+      site: "{{ mezza_sites.mediabyte }}"
+      http_auth: True
+
+
+
+######   PLAY 3  #######
+
+- name: 3 - Deploy a New Image -- Mezzanine Release
+  gather_facts: true
+  vars:
+     state: present
+     completed_message: |
+         The Mezzanine build has completed.
+         Link http://{{ elb_info.results[0].elb.dns_name }}/
+         For build details, go to
+         https://console.aws.amazon.com/cloudwatch/home?region={{ region }}#logStream:group=/aws/codebuild/MediabyteCMSBuild in Amazon CloudWatch Logs.
+
+  hosts: "infrastructure:&{{ env_id }}"                     # hosts selection back to same as in Play 1
+  vars_files:
+    - secrets.yml
+
+  roles:
+    - role: aws/scaling_group
+      scaling_group: "{{ mezza_scaling_group }}"
+      new_version: "{{ version }}"
+      rolling_update: true                                  # switch that triggers a rolling update
+
+  post_tasks:
+
+  - name: Send notification message via Slack
+    slack:
+      token: "{{ slack_token }}"
+      msg: "{{ completed_message }}"
+      color: "{% if success %}good{% else %}danger{% endif %}"
+      username: "{{ env_name }} Agent (via {{ ansible_user }})"
+      attachments:
+        - title: "Mezzanine Build Results"
+          text: "https://console.aws.amazon.com/cloudwatch/home?region={{ region }}#logStream:group=/aws/codebuild/MediabyteCMSBuild"
+          color: "{% if success %}good{% else %}danger{% endif %}"
+          fields:
+            - title: "Environment"
+              value: "{{ env_name }}"
+              short: "true"
+            - title: "Region"
+              value: "{{ region }}"
+              short: "true"
+            - title: "Version"
+              value: "{{ version }}"
+              short: "true"
+            - title: "Status"
+              value: "{% if success %}Success{% else %}Failure{% endif %}"
+              short: "true"
+
+  - name: Terminate Image-building Instance
+    ec2:
+      state: absent
+      region: "{{ region }}"
+      instance_ids:
+      - "{{ instance_id }}"

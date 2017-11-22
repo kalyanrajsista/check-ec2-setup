@@ -1,0 +1,17 @@
+---
+- name: "Create Security group {{ sg.sg_name }}"
+  ec2_group:
+    name: "{{ sg.sg_name | default('my_sg') }}"
+    description: "{{ sg.sg_description | default('My Security Group') }}"
+    state: "{{ sg.sg_state | default('present') }}"
+    region: "{{ sg.sg_region | default('ap-southeast-2') }}"
+    rules: "{{ sg.sg_rules | default(none) }}"
+    rules_egress: "{{ sg.sg_rules_egress | default(none) }}"
+    purge_rules: "{{ sg.sg_purge_rules | default(true) }}"
+    purge_rules_egress: "{{ sg.sg_purge_rules_egress | default(true) }}"
+    vpc_id: "{{ sg.sg_vpc_id | default(omit) }}"
+  register: sg_info
+#  with_items: "{{ sg_list }}"
+
+- name: debug
+  debug: var=sg_info.group_id

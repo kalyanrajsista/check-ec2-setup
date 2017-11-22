@@ -1,0 +1,1438 @@
+---
+#  Main VPC definition
+
+main_vpc_net:
+  vpc_name: "{{ env_name }} VPC (v1.0)"
+  vpc_cidr_block: "{{ vpc_cdir }}"
+  vpc_region: "{{ region }}"
+  vpc_state: "{{ state }}"
+  vpc_resource_tags:
+    Application: Infrastructure
+    Environment: "{{ env_name }}"
+  vpc_dns_support: true
+  vpc_dns_hostnames: true
+  vpc_internet_gateway: true
+  vpc_main_route_tags:
+    Name: "{{ env_name }} Public Subnet"
+    Application: Infrastructure
+    Network: Public
+    Environment: "{{ env_name }}"
+
+  vpc_subnets:
+# AZ1
+    - cidr: "{{vpc_private_subnets[0]}}"
+      az: "{{ az1 }}"
+      resource_tags:
+        Name: "{{ env_name }} Private Subnet 1"
+        Application: Infrastructure
+        Network: Private
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_public_subnets[0]}}"
+      az: "{{ az1 }}"
+      resource_tags:
+        Name: "{{ env_name }} Public Subnet 1"
+        Application: Infrastructure
+        Network: Public
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_db_subnets[0]}}"
+      az: "{{ az1 }}"
+      resource_tags:
+        Name: "{{ env_name }} DB Subnet 1"
+        Application: Infrastructure
+        Network: Database
+        Environment: "{{ env_name }}"
+
+# AZ2
+    - cidr: "{{vpc_private_subnets[1]}}"
+      az: "{{ az2 }}"
+      resource_tags:
+        Name: "{{ env_name }} Private Subnet 2"
+        Application: Infrastructure
+        Network: Private
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_public_subnets[1]}}"
+      az: "{{ az2 }}"
+      resource_tags:
+        Name: "{{ env_name }} Public Subnet 2"
+        Application: Infrastructure
+        Network: Public
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_db_subnets[1]}}"
+      az: "{{ az2 }}"
+      resource_tags:
+        Name: "{{ env_name }} DB Subnet 2"
+        Application: Infrastructure
+        Network: Database
+        Environment: "{{ env_name }}"
+
+
+# Peered Security/Access VPC
+
+main_vpc_peers:
+- vpc_id: "{{ access_vpc_id }}"
+  state: "{{ state }}"
+  tags:
+    Name: "{{ env_name }} Security"
+    Application: Infrastructure
+    Network: Security
+    Environment: "{{ env_name }}"
+
+
+# NAT Gateway(s)
+
+nat_public_subnet_ids: "{% if env_id.startswith('pr') %}{{ public_subnet_ids }}{% else %}{{ public_subnet_ids | list_slice(0,1) }}{% endif %}"
+nat_az1_pub_subnet_id: "{{ az1_public_subnet_id }}"
+nat_az2_pub_subnet_id: "{% if env_id.startswith('pr') %}{{ az2_public_subnet_id  }}{% else %}{{ az1_public_subnet_id }}{% endif %}"
+
+main_vpc_nat:
+  state: "{{ state }}"
+  region: "{{ region }}"
+  subnet_ids: "{{ nat_public_subnet_ids }}"
+
+
+# Routing tables
+
+all_vpc_routing_tables:
+- vpc_id: "{{ vpc_id }}"
+  subnets: "{{ vpc_public_subnets }}"
+  purge_subnets: no                       # Since this would be the Main table, subnet associations cannot be deleted
+  routes:
+  - dest: 0.0.0.0/0
+    gateway_id: igw
+  - dest: "{{ access_vpc_cidr }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  tags:
+    Name: "{{ env_name }} Public Subnet"
+    Application: Infrastructure
+    Network: Public
+    AZ: all
+    Environment: "{{ env_name }}"
+
+- vpc_id: "{{ vpc_id }}"
+  subnets: "{{ az1_private_subnet_ids }}"
+  purge_routes: no                       # So as to not remove the nat_route
+  routes:
+  - dest: "{{ vpc_cdir }}"
+  - dest: "{{ access_vpc_cidr }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  nat_route:
+    dest: 0.0.0.0/0
+    nat_gateway_id: "{{ vpc_nat_info.results | selectattr('subnet_id', 'equalto', nat_az1_pub_subnet_id) | map(attribute='nat_gateway_id') | join }}"
+  tags:
+    Name: "{{ env_name }} AZ1 Private RTB"
+    Application: Infrastructure
+    Network: Private
+    AZ: az1
+    Environment: "{{ env_name }}"
+
+- vpc_id: "{{ vpc_id }}"
+  subnets: "{{ az2_private_subnet_ids }}"
+  purge_routes: no                       # So as to not remove the nat_route
+  routes:
+  - dest: "{{ vpc_cdir }}"
+  - dest: "{{ access_vpc_cidr }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  nat_route:
+    dest: 0.0.0.0/0
+    nat_gateway_id: "{{ vpc_nat_info.results | selectattr('subnet_id', 'equalto', nat_az2_pub_subnet_id) | map(attribute='nat_gateway_id') | join }}"
+  tags:
+    Name: "{{ env_name }} AZ2 Private RTB"
+    Application: Infrastructure
+    Network: Private
+    AZ: az2
+    Environment: "{{ env_name }}"
+
+#TODO: uncomment following block for non-cross-account peering ( or fix the role )
+- vpc_id: "{{ access_vpc_id }}"
+  purge_routes: no
+  routes:
+  - dest: 0.0.0.0/0
+    gateway_id: igw
+  - dest: "{{ vpc_cdir }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  tags:
+    Name: Security Subnet
+    Application: Infrastructure
+    Network: Security
+    AZ: all
+    Environment: all
+
+
+# Security Groups
+
+ops_access_sg: "{{ env_id }}-ops-access"
+internal_services_alb_sg: "{{ env_id }}-internal-services-alb"
+public_services_alb_sg: "{{ env_id }}-public-services-alb"
+eventstore_lb_sg: "{{ env_id }}-eventstore-lb"
+eventstore_instance_sg: "{{ env_id }}-eventstore-instance"
+product_instance_sg: "{{ env_id }}-product-instance"
+
+#product_web_instance_sg: "{{ env_id }}-product-web-instance"
+#idm_instance_sg: "{{ env_id }}-ident-instance"
+#uw_services_instance_sg: "{{ env_id }}-uw-services-instance"
+#claims_web_lb_sg: "{{ env_id }}-claims-web-lb"
+#claims_web_instance_sg: "{{ env_id }}-claims-web-instance"
+#website_instance_sg: "{{ env_id }}-website-instance"
+#claims_instance_sg: "{{ env_id }}-claims-instance"
+#nagios_ns_client_sg: "{{ env_id }}-nagios-ns-client"
+#notifications_instance_sg: "{{ env_id }}-notifications-instance"
+
+sg_list:
+- sg_name: "{{ ops_access_sg }}"
+  sg_description: Enable Ops Access
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Ops Access"
+    Application: Infrastructure
+    Network: Public
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 22
+    to_port: 22
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 443
+    to_port: 443
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 3389
+    to_port: 3389
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: udp
+    from_port: 3389
+    to_port: 3389
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 5985                              # WinRM-HTTP/HTTPS
+    to_port: 5987
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: icmp
+    from_port: -1
+    to_port: -1
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: icmp
+    from_port: -1
+    to_port: -1
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 22
+    to_port: 22
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ public_services_alb_sg }}"
+  sg_description: Public Services Application Balancer Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Public Services ALB"
+    Application: Slice
+    Network: Public
+    Environment: "{{ env_name }}"
+#  sg_purge_rules: true
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{% if restricted_access %}{{ slice_office_cidr }}{% else %}0.0.0.0/0{% endif %}"
+  - proto: tcp
+    from_port: 443
+    to_port: 443
+    cidr_ip: "{% if restricted_access %}{{ slice_office_cidr }}{% else %}0.0.0.0/0{% endif %}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{{ slice_vpn_gw_cidr }}"
+  - proto: tcp
+    from_port: 443
+    to_port: 443
+    cidr_ip: "{{ slice_vpn_gw_cidr }}"
+
+
+- sg_name: "{{ internal_services_alb_sg }}"
+  sg_description: Internal services Application Balancer Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Internal services ALB"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+#  sg_purge_rules: true
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{{ access_vpc_cidr }}"
+
+- sg_name: "{{ idm_instance_sg }}"
+  sg_description: Slice IDM Services Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} IDM Intstances"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', internal_services_alb_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ product_web_instance_sg }}"
+  sg_description: Product Web Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Product Web Intstances"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', public_services_alb_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 8088
+    to_port: 8088
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', public_services_alb_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ product_instance_sg }}"
+  sg_description: Product Instance Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Product Intstances"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', internal_services_alb_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', public_services_alb_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ uw_services_instance_sg }}"
+  sg_description: UW Services Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} UW Services Intstances"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', internal_services_alb_sg) | map(attribute='group_id') | join() }}"
+
+
+- sg_name: "{{ claims_web_lb_sg }}"
+  sg_description: Claims Web Load Balancer Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Claims Web LB"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{{ access_vpc_cidr }}"
+
+- sg_name: "{{ claims_web_instance_sg }}"
+  sg_description: Claims Web Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Claims Web Intstances"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_web_lb_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ website_instance_sg }}"
+  sg_description: Wordpress Website Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Website Intstances"
+    Application: Wordpress
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', public_services_alb_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ claims_instance_sg }}"
+  sg_description: Claims Instance Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Claims Intstances"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', internal_services_alb_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ eventstore_lb_sg }}"
+  sg_description: Private Eventstore Load Balancer Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Private Eventstore LB"
+    Application: Slice
+    Network: Database
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 2113
+    to_port: 2113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1113
+    to_port: 1113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+
+  - proto: tcp
+    from_port: 2113
+    to_port: 2113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1113
+    to_port: 1113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+
+  - proto: tcp
+    from_port: 2113
+    to_port: 2113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1113
+    to_port: 1113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+
+  - proto: tcp
+    from_port: 2113
+    to_port: 2113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1113
+    to_port: 1113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+
+
+- sg_name: "{{ eventstore_instance_sg }}"
+  sg_description: Private Eventstore Instance Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Eventstore Instance"
+    Application: Slice
+    Network: Database
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 2113
+    to_port: 2113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_lb_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1113
+    to_port: 1113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_lb_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 2113
+    to_port: 2113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1113
+    to_port: 1113
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 2112
+    to_port: 2112
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_instance_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 1112
+    to_port: 1112
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_instance_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ nagios_ns_client_sg }}"
+  sg_description: Nagios Client Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Nagios Client"
+    Application: Monitoring
+    Network: All
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 5666
+    to_port: 5666
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 12489
+    to_port: 12489
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: icmp
+    from_port: -1
+    to_port: -1
+    cidr_ip: "{{ access_vpc_cidr }}"
+
+- sg_name: "{{ notifications_instance_sg }}"
+  sg_description: Notifications Instance Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Notifications Instance"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 22
+    to_port: 22
+    cidr_ip: "{{ access_vpc_cidr }}"
+
+
+# S3 buckets
+
+docs_bucket:
+- bucket_name: "docs.airsembly-{{ env_id }}.com"
+
+portal_bucket:
+- bucket_name: "www.airsembly-{{ env_id }}.com"
+
+#- bucket_name: "{{ env_id }}-airvm.com-import-files"
+#- bucket_name: "{{ env_type }}-slice.is-assets-open"
+#- bucket_name: "{{ env_type }}-slice.is-assets-protected"
+#- bucket_name: 1-ops
+#  object: "/{{ env_id }}"
+
+# Lambda functions
+
+ops_functions:
+- name: ops-snap-ebs
+#  region: "{{ default_region }}"
+  description: Takes scheduled snapshots of tagged EBS volumes.
+#  code_s3_bucket: package-bucket
+  code_s3_key: "lambda/ops-snap-ebs.zip"
+  project_path: "../ops-lambda-functions"
+  runtime: python2.7
+  timeout: 5
+  handler: function.handler
+  memory_size: 128
+  role: lambda_ec2_snapshot
+  env_variables:
+    - var: DR_ACCOUNT_ID
+      value: "{{ aws_accounts.slice_dr }}"
+    - var: SNAP_RETENTION
+      value: "14"
+  vpc_subnet_ids: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | list() }}"
+  vpc_security_group_ids:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+
+
+# Load Balancers
+
+elb_list:
+
+- elb_name: "{{ env_id }}-claims-web-elb"
+  elb_state: "{{ state }}"
+#  elb_zones: "{{[az1, az2, az3] | unique}}"
+  elb_subnets: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | list() }}"
+  elb_scheme: internal
+  elb_security_group_ids:
+  - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_web_lb_sg) | map(attribute='group_id') | join() }}"
+  elb_listeners:
+  - protocol: http
+    load_balancer_port: 80
+    instance_protocol: http
+    instance_port: 80
+  elb_health_check:
+    ping_protocol: tcp        # http
+    ping_port: 80
+#    ping_path: /
+    response_timeout: 5
+    interval: 30
+    unhealthy_threshold: 2
+    healthy_threshold: 5
+  elb_connection_draining_timeout: 60
+  elb_idle_timeout: 60
+  elb_cross_az_load_balancing: true
+  elb_resource_tags:
+    Name: "{{ env_id }}-claims-web-elb"
+    Application: Claims
+    Network: Private
+    Environment: "{{ env_name }}"
+
+- elb_name: "{{ env_id }}-private-eventstore-elb"
+  elb_state: "{{ state }}"
+  elb_subnets: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Database') | map(attribute='subnet.id') | list() }}"
+  elb_scheme: internal
+  elb_security_group_ids:
+  - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_lb_sg) | map(attribute='group_id') | join() }}"
+  elb_listeners:
+  - protocol: tcp
+    load_balancer_port: 1113
+    instance_protocol: tcp
+    instance_port: 1113
+  - protocol: tcp
+    load_balancer_port: 2113
+    instance_protocol: tcp
+    instance_port: 2113
+  elb_health_check:
+    ping_protocol: tcp
+    ping_port: 2113
+    response_timeout: 5
+    interval: 30
+    unhealthy_threshold: 2
+    healthy_threshold: 5
+  elb_connection_draining_timeout: 60
+  elb_idle_timeout: 60
+  elb_cross_az_load_balancing: true
+  elb_resource_tags:
+    Name: "{{ env_id }}-private-eventstore-elb"
+    Application: Eventstore
+    Network: Database
+    Environment: "{{ env_name }}"
+
+
+# External (Public) Application Load Balancer
+
+# Target Group names
+
+pub_website_tg: "{{ env_id }}-pub-website-tg"
+pub_product_tg: "{{ env_id }}-pub-product-tg"
+pub_product_web_tg: "{{ env_id }}-pub-product-web-tg"
+pub_blackhole_tg: "{{ env_id }}-pub-blackhole-tg"
+
+public_services_lb:
+  name: "{{ env_id }}-public-services-alb"
+#  dns:
+#    host_name: "{{ env_id }}-services"
+#    zone: "{{ public_dns_zone }}"
+#    type: CNAME
+##    alias: true
+#    alias_hosted_zone_id: Z35SXDOTRQ7X7K
+#    ttl: 3600
+  subnets: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Public') | map(attribute='subnet.id') | list() }}"
+  security_groups:
+  - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', public_services_alb_sg) | map(attribute='group_id') | join() }}"
+  scheme: internet-facing
+  tags:
+  - Key: Name
+    Value: "{{ env_name }} Public Services ALB"
+  - Key: Application
+    Value: Slice
+  - Key: Network
+    Value: Public
+  - Key: Environment
+    Value: "{{ env_name }}"
+  listeners:
+  - protocol: https
+    port: 443
+    certificates:
+    - CertificateArn: "{{ ssl_certificate_arn }}"
+    rules:
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/*/swagger/*'
+      priority: 5
+      target_group:
+        name: "{{ pub_blackhole_tg }}"
+        protocol: http
+        port: 80
+      exclude_envs_regex: "^(dev|tst).*"
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-api-int.slice.is{% else %}api.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/hs/*'
+      priority: 10
+      target_group:
+        name: "{{ pub_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-api-int.slice.is{% else %}api.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/rs/*'
+      priority: 15
+      target_group:
+        name: "{{ pub_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-www-int.slice.is{% else %}www.slice.is{% endif %}"
+      priority: 20
+      target_group:
+        name: "{{ pub_website_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-apps-int.slice.is{% else %}apps.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/*'
+      priority: 30
+      target_group:
+        name: "{{ pub_product_web_tg }}"
+        protocol: http
+        port: 80
+
+    - conditions:                   # default
+      priority: default
+      target_group:
+        name: "{{ pub_blackhole_tg }}"
+        protocol: http
+        port: 80
+
+  - protocol: http
+    port: 80
+    rules:
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/*/swagger/*'
+      priority: 5
+      target_group:
+        name: "{{ pub_blackhole_tg }}"
+        protocol: http
+        port: 80
+      exclude_envs_regex: "^(dev|tst).*"
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{{ env_id }}-api-int.slice.is"
+      - Field: path-pattern
+        Values:
+        - '/hs/*'
+      priority: 10
+      target_group:
+        name: "{{ pub_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{{ env_id }}-api-int.slice.is"
+      - Field: path-pattern
+        Values:
+        - '/rs/*'
+      priority: 15
+      target_group:
+        name: "{{ pub_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{{ env_id }}-www-int.slice.is"
+      priority: 20
+      target_group:
+        name: "{{ pub_website_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-apps-int.slice.is{% else %}apps.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/*'
+      priority: 30
+      target_group:
+        name: "{{ pub_product_web_tg }}"
+        protocol: http
+        port: 80
+
+    - conditions:                   # default
+      priority: default
+      target_group:
+        name: "{{ pub_blackhole_tg }}"
+        protocol: http
+        port: 80
+
+
+# Internal (Private) Application Load Balancer
+
+# Target Group names
+
+int_product_tg: "{{ env_id }}-int-product-tg"
+int_idm_tg: "{{ env_id }}-int-idm-tg"
+int_uw_services_tg: "{{ env_id }}-int-uw-services-tg"
+int_claims_tg: "{{ env_id }}-claims-tg"
+
+internal_services_lb:
+  name: "{{ env_id }}-internal-services-alb"
+#  dns:
+#    host_name: "{{ env_id }}-services"
+#    zone: "{{ private_dns_zone }}"
+#    private_zone: true
+#    alias: true
+#    alias_hosted_zone_id: Z35SXDOTRQ7X7K
+#    ttl: 3600
+  subnets: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | list() }}"
+  security_groups:
+  - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', internal_services_alb_sg) | map(attribute='group_id') | join() }}"
+  scheme: internal
+  tags:
+  - Key: Name
+    Value: "{{ env_name }} Internal services ALB"
+  - Key: Application
+    Value: Slice
+  - Key: Network
+    Value: Private
+  - Key: Environment
+    Value: "{{ env_name }}"
+  listeners:
+  - protocol: http
+    port: 80
+    rules:
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/hs-int/*'
+      priority: 10
+      target_group:
+        name: "{{ int_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/rs-int/*'
+      priority: 15
+      target_group:
+        name: "{{ int_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/idm-int/*'
+      priority: 20
+      target_group:
+        name: "{{ int_idm_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/claims-int/*'
+      priority: 30
+      target_group:
+        name: "{{ int_claims_tg }}"
+        protocol: http
+        port: 80
+    - conditions:                   # default
+#      - Field: path-pattern
+#        Values:
+#        - '/weather/*; /sdn/*; /rce/*'
+      priority: default
+      target_group:
+        name: "{{ int_uw_services_tg }}"
+        protocol: http
+        port: 80
+
+
+
+# product group:
+
+product_scaling_group:
+  ami:
+    id: "{{ product_ami | default(omit) }}"
+    name: product-api
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-product-scaling"
+  launch_config:
+    instance_type: "{{ product_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+#    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+#    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+#    instance_profile_name: Deploy-Slice-Core-EC2
+#    volumes:
+#    - device_name: /dev/sda1
+#      volume_size: 60
+#      device_type: gp2
+#      delete_on_termination: true
+
+#    user_data:
+#    assign_public_ip: false
+#    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+#    key_name: "{{ product_keypair }}"
+#
+#  auto_scaling_group:
+#    # load_balancers:
+#    # - "{{ env_id }}-product-elb"
+#    target_groups:
+#    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', int_product_tg) | map(attribute='target_group_arn') | join() }}"
+#    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', pub_product_tg) | map(attribute='target_group_arn') | join() }}"
+#    min_size: "{{ product_inst_min | default(0) }}"
+#    max_size: "{{ product_inst_max  | default(4) }}"
+#    desired_capacity: "{{ product_inst_desired | default(product_inst_min) }}"
+#    health_check_type: ELB
+#    health_check_period: 420
+#    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+#    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+##    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | list() }}"
+#    tags:
+#    - {'Key': 'Name', 'Value': '{{ env_name }} Product'}
+#    - {'Key': 'Application', 'Value': 'Slice'}
+#    - {'Key': 'Network', 'Value': 'Private'}
+#    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+  policies:
+    scale_up:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: ">="
+      threshold: 70.0
+      evaluation_periods: 2
+      period: 60
+      scaling_adjustment: +1
+      cooldown: 60
+
+    scale_down:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: "<="
+      threshold: 40.0
+      evaluation_periods: 5
+      period: 60
+      scaling_adjustment: -1
+      cooldown: 180
+
+# idm group
+
+idm_scaling_group:
+  ami:
+    id: "{{ idm_ami | default(omit) }}"
+    name: idm
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-idm-scaling"
+  launch_config:
+    instance_type: "{{ idm_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    volumes:
+#    - device_name: /dev/sda1
+#      volume_size: 60
+#      device_type: gp2
+#      delete_on_termination: true
+
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ idm_keypair }}"
+
+  auto_scaling_group:
+    # load_balancers:
+    # - "{{ env_id }}-idm-elb"
+    target_groups:
+    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', int_idm_tg) | map(attribute='target_group_arn') | join() }}"
+    min_size: "{{ idm_inst_min | default(0) }}"
+    max_size: "{{ idm_inst_max  | default(4) }}"
+    desired_capacity: "{{ idm_inst_desired | default(idm_inst_min) }}"
+    health_check_type: ELB
+    health_check_period: 420
+    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} IDM'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+  policies:
+    scale_up:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: ">="
+      threshold: 70.0
+      evaluation_periods: 2
+      period: 60
+      scaling_adjustment: +1
+      cooldown: 60
+
+    scale_down:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: "<="
+      threshold: 40.0
+      evaluation_periods: 5
+      period: 60
+      scaling_adjustment: -1
+      cooldown: 180
+
+
+# moratorium group
+
+uw_services_scaling_group:
+  ami:
+    id: "{{ uw_services_ami | default(omit) }}"
+    name: uw-services
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-uw-services-scaling"
+  launch_config:
+    instance_type: "{{ uw_services_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    volumes:
+#    - device_name: /dev/sda1
+#      volume_size: 60
+#      device_type: gp2
+#      delete_on_termination: true
+
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ uw_services_keypair }}"
+
+  auto_scaling_group:
+    target_groups:
+    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', int_uw_services_tg) | map(attribute='target_group_arn') | join() }}"
+    min_size: "{{ uw_services_inst_min | default(0) }}"
+    max_size: "{{ uw_services_inst_max  | default(4) }}"
+    desired_capacity: "{{ uw_services_inst_desired | default(uw_services_inst_min) }}"
+    health_check_type: ELB
+    health_check_period: 420
+    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} UW Services'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+  policies:
+    scale_up:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: ">="
+      threshold: 70.0
+      evaluation_periods: 2
+      period: 60
+      scaling_adjustment: +1
+      cooldown: 60
+
+    scale_down:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: "<="
+      threshold: 40.0
+      evaluation_periods: 5
+      period: 60
+      scaling_adjustment: -1
+      cooldown: 180
+
+# Claims API group
+
+claims_scaling_group:
+  ami:
+    id: "{{ claims_ami | default(omit) }}"
+    name: claims
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-claims-scaling"
+  launch_config:
+    instance_type: "{{ claims_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    volumes:
+#    - device_name: /dev/sda1
+#      volume_size: 60
+#      device_type: gp2
+#      delete_on_termination: true
+
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ claims_keypair }}"
+
+  auto_scaling_group:
+    target_groups:
+    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', int_claims_tg) | map(attribute='target_group_arn') | join() }}"
+    min_size: "{{ claims_inst_min | default(0) }}"
+    max_size: "{{ claims_inst_max  | default(4) }}"
+    desired_capacity: "{{ claims_inst_desired | default(claims_inst_min) }}"
+    health_check_type: ELB
+    health_check_period: 420
+    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') |  join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Claims'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+  policies:
+    scale_up:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: ">="
+      threshold: 70.0
+      evaluation_periods: 2
+      period: 60
+      scaling_adjustment: +1
+      cooldown: 60
+
+    scale_down:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: "<="
+      threshold: 40.0
+      evaluation_periods: 5
+      period: 60
+      scaling_adjustment: -1
+      cooldown: 180
+
+
+# Claims Web group
+
+claims_web_scaling_group:
+  ami:
+    id: "{{ claims_web_ami | default(omit) }}"
+    name: claims-web
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-claims-web-scaling"
+  launch_config:
+    instance_type: "{{ claims_web_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_web_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ claims_web_keypair }}"
+
+  auto_scaling_group:
+    load_balancers:
+    - "{{ env_id }}-claims-web-elb"
+    min_size: "{{ claims_web_inst_min | default(0) }}"
+    max_size: "{{ claims_web_inst_max  | default(4) }}"
+    desired_capacity: "{{ claims_web_inst_desired | default(claims_web_inst_min) }}"
+    health_check_type: EC2
+    health_check_period: 300
+    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Claims Web'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+# Slice Product Web group:
+
+product_web_scaling_group:
+  ami:
+    id: "{{product_web_ami | default(omit) }}"
+    name: product-web
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-product-web-scaling"
+  launch_config:
+    instance_type: "{{ product_web_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_web_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    volumes:
+#    - device_name: /dev/sda1
+#      volume_size: 60
+#      device_type: gp2
+#      delete_on_termination: true
+
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ product_web_keypair }}"
+
+  auto_scaling_group:
+    # load_balancers:
+    # - "{{ env_id }}-product-web-elb"
+    target_groups:
+    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', pub_product_web_tg) | map(attribute='target_group_arn') | join() }}"
+    min_size: "{{ product_web_inst_min | default(0) }}"
+    max_size: "{{ product_web_inst_max  | default(4) }}"
+    desired_capacity: "{{ product_web_inst_desired | default(product_web_inst_min) }}"
+    health_check_period: 420
+    health_check_type: ELB
+    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Product Web'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+  policies:
+    scale_up:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: ">="
+      threshold: 70.0
+      evaluation_periods: 2
+      period: 60
+      scaling_adjustment: +1
+      cooldown: 60
+
+    scale_down:
+      metric: CPUUtilization
+      statistic: Average
+      unit: Percent
+      comparison: "<="
+      threshold: 40.0
+      evaluation_periods: 5
+      period: 60
+      scaling_adjustment: -1
+      cooldown: 180
+
+# SliceWebsite group:
+
+website_scaling_group:
+  ami:
+    id: "{{ website_ami | default(omit) }}"
+    name: website
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-website-scaling"
+  launch_config:
+    instance_type: "{{ website_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', website_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ website_keypair }}"
+
+  auto_scaling_group:
+    target_groups:
+    - "{{ target_group_info.target_groups | selectattr('target_group_name', 'equalto', pub_website_tg) | map(attribute='target_group_arn') | join() }}"
+    min_size: "{{ website_inst_min | default(0) }}"
+    max_size: "{{ website_inst_max  | default(4) }}"
+    desired_capacity: "{{ website_inst_desired | default(website_inst_min) }}"
+    health_check_period: 420
+    health_check_type: ELB
+    suspend_processes: "{% if not autoscaling %}{{ no_scaling_suspended_processes }}{% else %}{{ [] }}{% endif %}"
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Website'}
+    - {'Key': 'Application', 'Value': 'Wordpress'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+#  policies:
+#    scale_up:
+#      metric: CPUUtilization
+#      statistic: Average
+#      unit: Percent
+#      comparison: ">="
+#      threshold: 70.0
+#      evaluation_periods: 2
+#      period: 60
+#      scaling_adjustment: +1
+#      cooldown: 60
+#
+#    scale_down:
+#      metric: CPUUtilization
+#      statistic: Average
+#      unit: Percent
+#      comparison: "<="
+#      threshold: 40.0
+#      evaluation_periods: 5
+#      period: 60
+#      scaling_adjustment: -1
+#      cooldown: 180
+
+
+# Slice Eventstore cluster
+
+eventstore_scaling_group:
+  ami:
+    id: "{{ eventstore_ami | default(omit) }}"
+    name: eventstore-image
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-eventstore-scaling"
+  launch_config:
+    instance_type: "{{ eventstore_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', eventstore_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+
+    instance_profile_name: EventStore-Instance
+    volumes:
+    - device_name: /dev/sdf
+      volume_size: 40
+      device_type: gp2
+      delete_on_termination: false
+
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ eventstore_keypair }}"
+
+  auto_scaling_group:
+    load_balancers:
+    - "{{ env_id }}-private-eventstore-elb"
+    min_size: "{{ eventstore_inst_min | default(0) }}"
+    max_size: "{{ eventstore_inst_max  | default(4) }}"
+    desired_capacity: "{{ eventstore_inst_desired | default(eventstore_inst_min) }}"
+    health_check_type: ELB
+    health_check_period: 300
+    suspend_processes:
+    - Terminate
+    - AZRebalance
+    - ReplaceUnhealthy
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Database') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Eventstore Cluster'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Database'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}
+
+
+# Notifications instance/cluster
+
+notifications_scaling_group:
+  ami:
+    id: "{{ notifications_ami | default(omit) }}"
+    name: notifications-image
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-notifications-scaling"
+  launch_config:
+    instance_type: "{{ notifications_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', notifications_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ notifications_keypair }}"
+
+  auto_scaling_group:
+    min_size: "{{ notifications_inst_min | default(0) }}"
+    max_size: "{{ notifications_inst_max  | default(4) }}"
+    desired_capacity: "{{ notifications_inst_desired | default(notifications_inst_min) }}"
+    health_check_type: EC2
+    health_check_period: 300
+    suspend_processes:
+    - Terminate
+    - AZRebalance
+    - ReplaceUnhealthy
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Notifications'}
+    - {'Key': 'Application', 'Value': 'Slice'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}

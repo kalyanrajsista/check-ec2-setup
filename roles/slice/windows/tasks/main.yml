@@ -1,0 +1,20 @@
+---
+- name: Wait for WinRM to be up
+  wait_for_connection:
+
+#  - name: Add or update registry
+#    win_regedit:
+#      path: HKLM:\SYSTEM\CurrentControlSet\Services\EventLog
+#      name: hello
+#      data: 1337
+#      type: dword
+
+- name: Copy basic Windows prep ps1 script to remote host
+  win_copy:
+    src: scripts/windowsprep.ps1
+    dest: c:\Users\Administrator
+
+- name: Execute Windows prep script on remote host
+  win_shell: C:windowsprep.ps1 >> c:windowsprep.log
+  args:
+    chdir: c:\Users\Administrator

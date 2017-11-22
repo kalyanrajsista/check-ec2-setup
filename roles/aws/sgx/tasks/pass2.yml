@@ -1,0 +1,18 @@
+- name: Create Security group with xrefs (pass 2)
+  ec2_group:
+    name: "{{ item.sg_name | default('my_sg') }}"
+    description: "{{ item.sg_description | default('Security Group') }}"
+    state: "{{ item.sg_state | default('present') }}"
+    region: "{{ item.sg_region | default(omit) }}"
+    rules: "{{ item.sg_rules | default(omit) }}"
+    rules_egress: "{{ item.sg_rules_egress | default(omit) }}"
+    purge_rules: "{{ item.sg_purge_rules | default(false) }}"
+    purge_rules_egress: "{{ item.sg_purge_rules_egress | default(false) }}"
+    vpc_id: "{{ item.sg_vpc_id | default(omit) }}"
+  register: sg_info
+  with_items: "{{ sg_list }}"
+
+#- name: debug
+#  debug: var=sg_init.results
+#
+#- set_fact: objs = "{{sg_init['results']}}"

@@ -1,0 +1,6 @@
+---
+dependencies:
+- role: aws/vpc_net
+- role: aws/vpc_pcx
+- role: aws/vpc_nat
+- role: aws/vpc_rtb

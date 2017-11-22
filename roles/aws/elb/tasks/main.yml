@@ -1,0 +1,53 @@
+---
+- name: " Create Elastic Load Balancers"
+  ec2_elb_lb:
+    region: "{{ region }}"
+    name: "{{item.elb_name}}"
+    state: present
+    zones: "{{item.elb_zones | default(omit)}}"
+    subnets: "{{item.elb_subnets | default(omit)}}"
+    scheme: "{{item.elb_scheme | default('internet-facing')}}"
+    instance_ids: "{{item.elb_instance_ids | default(omit)}}"
+    security_group_ids: "{{item.elb_security_group_ids | default(omit)}}"
+    listeners: "{{item.elb_listeners | default(omit)}}"
+    purge_listeners: "{{item.elb_purge_listeners | default(true)}}"
+    health_check: "{{item.elb_health_check | default(omit)}}"
+      # ping_protocol: http
+      # ping_port: 80
+      # ping_path: /index.html
+      # response_timeout: 5
+      # interval: 30
+      # unhealthy_threshold: 2
+      # healthy_threshold: 10
+    access_logs: "{{item.elb_access_log | default(omit)}}"
+      # interval: 5
+      # s3_location: "some-bucket"
+      # s3_prefix: logs
+    connection_draining_timeout: "{{item.elb_connection_draining_timeout | default(omit)}}"
+    idle_timeout: "{{item.elb_idle_timeout | default(omit)}}"
+    cross_az_load_balancing: "{{item.elb_cross_az_load_balancing | default(false)}}"
+    stickiness: "{{item.elb_stickiness | default(omit)}}"
+      # type: application
+      # enabled: yes
+      # cookie: SESSIONID
+    wait: "{{item.elb_wait | default(omit)}}"
+    wait_timeout: "{{item.elb_wait_timeout | default(omit)}}"
+    tags: "{{item.elb_resource_tags | default(omit)}}"
+
+  register: elb_info
+  with_items: "{{ elb_list }}"
+
+
+#
+#- name: "Route53 Record | {{ network }}.{{ stack_name }}-{{ environment_tier }}.{{ domain }}"
+#  route53:
+#    command: create
+#    overwrite: yes
+#    zone: "{{ domain }}"
+#    record: "{{ network }}.{{ stack_name }}-{{ environment_tier }}.{{ domain }}"
+#    type: CNAME
+#    value: "{{ balancer.elb.dns_name }}"
+#    ttl: 300
+#  when: dns_points_to_load_balancer
+#  tags:
+#    - dns

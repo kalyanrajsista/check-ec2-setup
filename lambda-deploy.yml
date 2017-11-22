@@ -1,0 +1,23 @@
+---
+
+- name: Deploy Lambda Functions
+  gather_facts: yes
+  vars:
+    state: present
+    project_folder: /Users/Pierre/PyCharmProjects/slice-snapshot
+    deployment_package: function.zip
+#    account: 123456789012
+    version_to_delete: 0
+  vars_files:
+    - secrets.yml
+
+  hosts: "infrastructure:&{{ env_id }}"
+
+  roles:
+  - role: aws/vpc
+    vpc: "{{  main_vpc }}"
+
+  - role: aws/sgx
+
+  - name: aws/lambda
+    lambda_functions: "{{ ops_functions }}"

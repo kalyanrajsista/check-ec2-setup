@@ -1,0 +1,44 @@
+---
+scaling_group:
+  ami:
+    name: default image
+    instance_id:
+    wait: yes
+
+  launch_config:
+    name: default launch configuration
+    assign_public_ip: False
+    instance_type: t2.micro
+#    image_id:
+#    security_groups:
+    instance_profile_name: autonomous
+#    user_data:
+
+  auto_scaling_group:
+    name: default asg
+    availability_zones:
+    launch_config_name:
+
+    min_size: 0
+    max_size: 0
+    desired_capacity: 0
+    vpc_zone_identifier:
+    tags:
+      Name: name tag
+      Application: app tag
+      Network: net tag
+      Environment: env tag
+
+
+  scaling_policy:
+
+  metric_alarm:
+
+
+default_suspended_processes:
+- Terminate
+- HealthCheck
+- AZRebalance
+- ReplaceUnhealthy
+- ScheduledActions
+- Launch

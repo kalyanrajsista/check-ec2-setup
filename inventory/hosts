@@ -1,0 +1,20 @@
+localhost ansible_connection=local ansible_python_interpreter=python
+
+
+
+[product_infrastructure]
+ops01
+
+dev03
+ext03
+ext04
+ops03
+tst03
+stg03
+prd03
+
+dev04
+
+[common_infrastructure]
+shared
+

@@ -1,0 +1,9 @@
+---
+
+dependencies:
+- role: aws/image_builder
+  image_specs: "{{ eventstore_image_specs }}"
+
+#- role: aws/asg
+#  scaling_group: "{{ eventstore_scaling_group }}"
+...

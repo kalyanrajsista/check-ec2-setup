@@ -1,0 +1,75 @@
+---
+ansible_connection: local
+ansible_python_interpreter: python
+
+env_name: PRD03
+env_type: prd
+
+region: us-east-1
+vpc_cdir: 10.67.0.0/16
+access_vpc_cidr: 172.25.0.0/16
+
+restricted_access: false
+detailed_monitoring: true
+autoscaling: true
+
+vpc_public_subnets: ['10.67.0.0/21', '10.67.8.0/21']
+vpc_private_subnets: ['10.67.192.0/19', '10.67.224.0/19']
+vpc_db_subnets: ['10.67.16.0/21', '10.67.32.0/21']
+
+product_ami: ami-de1869c8
+product_instance_type: t2.large
+product_inst_min: 1
+product_inst_max: 2
+product_keypair: prd03-nv
+
+idm_ami: ami-b11968a7
+idm_instance_type: t2.large
+idm_inst_min: 1
+idm_inst_max: 2
+idm_keypair: prd03-nv
+
+uw_services_ami: ami-e11869f7
+uw_services_instance_type: t2.large
+uw_services_inst_min: 1
+uw_services_inst_max: 2
+uw_services_keypair: prd03-nv
+
+claims_ami: ami-70176666
+claims_instance_type: t2.medium
+claims_inst_min: 1
+claims_inst_max: 2
+claims_keypair: prd03-nv
+
+claims_web_ami: ami-e11b6af7
+claims_web_instance_type: t2.medium
+claims_web_inst_min: 1
+claims_web_inst_max: 2
+claims_web_keypair: prd03-nv
+
+product_web_ami: ami-ab1a6bbd
+product_web_instance_type: t2.medium
+product_web_inst_min: 1
+product_web_inst_max: 2
+product_web_keypair: prd03-nv
+
+eventstore_ami: ami-5e027348
+eventstore_instance_type: m4.large
+eventstore_inst_min: 3
+eventstore_inst_max: 3
+eventstore_keypair: prd03-nv
+
+#website_ami: ami-58f1814e
+#website_instance_type: t2.medium
+#website_inst_min: 1
+#website_inst_max: 2
+#website_keypair: prd03-nv
+
+notifications_ami: ami-cad1c6ae
+notifications_instance_type: t2.large
+notifications_inst_min: 1
+notifications_inst_max: 1
+notifications_keypair: prd03-nv
+
+
+ssl_certificate_arn: "arn:aws:acm:us-east-1:986541333113:certificate/e73fc039-0a80-4ab7-aff2-b232412e1596"    # May 2017

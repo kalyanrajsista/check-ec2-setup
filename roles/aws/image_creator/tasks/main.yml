@@ -1,0 +1,30 @@
+---
+- debug:
+    msg: "image_instances = {{ image_instances }}"
+
+- name: "Create Role AMIs "
+  ec2_ami:
+    state: "{{ state | default('present') }}"
+    region: "{{ region }}"
+    name: "{{ env_id }}-{{ item.item.name }}-{{ new_version }}"
+    description: "AMI for {{ item.item.name }} version {{ new_version }}"
+    instance_id: "{{ item.tagged_instances[0].id }}"
+    delete_snapshot: yes
+    wait: yes
+  register: role_images
+#  when: instance_id is defined
+  with_items: "{{ image_instances.results }}"
+#
+- debug:
+    msg: "{{ role_images }}"
+#
+#- name: Terminate image intances
+#  ec2:
+#    state: "absent"
+#    instance_id: "{{ item.tagged_instances[0].id }}"
+#    region: "{{ region }}"
+##  environment: "{{ aws_env }}"
+##  delegate_to: "{{ aws_control }}"
+#  with_items: "{{ image_instances.results }}"
+
+

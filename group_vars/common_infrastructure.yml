@@ -1,0 +1,644 @@
+---
+#  Main VPC definition
+
+main_vpc_net:
+  vpc_name: "{{ env_name }} VPC"
+  vpc_cidr_block: "{{ vpc_cdir }}"
+  vpc_region: "{{ region }}"
+  vpc_state: "{{ state }}"
+  vpc_resource_tags:
+    Application: Infrastructure
+    Environment: "{{ env_name }}"
+  vpc_dns_support: true
+  vpc_dns_hostnames: true
+  vpc_internet_gateway: true
+  vpc_main_route_tags:
+    Name: "{{ env_name }} Public Subnet"
+    Application: Infrastructure
+    Network: Public
+    Environment: "{{ env_name }}"
+
+  vpc_subnets:
+# AZ1
+    - cidr: "{{vpc_private_subnets[0]}}"
+      az: "{{ az1 }}"
+      resource_tags:
+        Name: "{{ env_name }} Private Subnet 1"
+        Application: Infrastructure
+        Network: Private
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_public_subnets[0]}}"
+      az: "{{ az1 }}"
+      resource_tags:
+        Name: "{{ env_name }} Public Subnet 1"
+        Application: Infrastructure
+        Network: Public
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_db_subnets[0]}}"
+      az: "{{ az1 }}"
+      resource_tags:
+        Name: "{{ env_name }} DB Subnet 1"
+        Application: Infrastructure
+        Network: Database
+        Environment: "{{ env_name }}"
+
+# AZ2
+    - cidr: "{{vpc_private_subnets[1]}}"
+      az: "{{ az2 }}"
+      resource_tags:
+        Name: "{{ env_name }} Private Subnet 2"
+        Application: Infrastructure
+        Network: Private
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_public_subnets[1]}}"
+      az: "{{ az2 }}"
+      resource_tags:
+        Name: "{{ env_name }} Public Subnet 2"
+        Application: Infrastructure
+        Network: Public
+        Environment: "{{ env_name }}"
+
+    - cidr: "{{vpc_db_subnets[1]}}"
+      az: "{{ az2 }}"
+      resource_tags:
+        Name: "{{ env_name }} DB Subnet 2"
+        Application: Infrastructure
+        Network: Database
+        Environment: "{{ env_name }}"
+
+
+# Peered Security/Access VPC
+
+main_vpc_peers:
+- vpc_id: "{{ access_vpc_id }}"
+  state: "{{ state }}"
+  tags:
+    Name: "{{ env_name }} Security"
+    Application: Infrastructure
+    Network: Security
+    Environment: "{{ env_name }}"
+
+
+# NAT Gateway(s)
+
+nat_public_subnet_ids: "{% if env_id.startswith('pr') %}{{ public_subnet_ids }}{% else %}{{ public_subnet_ids | list_slice(0,1) }}{% endif %}"
+nat_az1_pub_subnet_id: "{{ az1_public_subnet_id }}"
+nat_az2_pub_subnet_id: "{% if env_id.startswith('pr') %}{{ az2_public_subnet_id  }}{% else %}{{ az1_public_subnet_id }}{% endif %}"
+
+main_vpc_nat:
+  state: "{{ state }}"
+  region: "{{ region }}"
+  subnet_ids: "{{ nat_public_subnet_ids }}"
+
+
+# Routing tables
+
+all_vpc_routing_tables:
+- vpc_id: "{{ vpc_id }}"
+  subnets: "{{ vpc_public_subnets }}"
+  purge_subnets: no                       # Since this would be the Main table, subnet associations cannot be deleted
+  routes:
+  - dest: 0.0.0.0/0
+    gateway_id: igw
+  - dest: "{{ access_vpc_cidr }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  tags:
+    Name: "{{ env_name }} Public Subnet"
+    Application: Infrastructure
+    Network: Public
+    AZ: all
+    Environment: "{{ env_name }}"
+
+- vpc_id: "{{ vpc_id }}"
+  subnets: "{{ az1_private_subnet_ids }}"
+  purge_routes: no                       # So as to not remove the nat_route
+  routes:
+  - dest: "{{ vpc_cdir }}"
+  - dest: "{{ access_vpc_cidr }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  nat_route:
+    dest: 0.0.0.0/0
+    nat_gateway_id: "{{ vpc_nat_info.results | selectattr('subnet_id', 'equalto', nat_az1_pub_subnet_id) | map(attribute='nat_gateway_id') | join }}"
+  tags:
+    Name: "{{ env_name }} AZ1 Private RTB"
+    Application: Infrastructure
+    Network: Private
+    AZ: az1
+    Environment: "{{ env_name }}"
+
+- vpc_id: "{{ vpc_id }}"
+  subnets: "{{ az2_private_subnet_ids }}"
+  purge_routes: no                       # So as to not remove the nat_route
+  routes:
+  - dest: "{{ vpc_cdir }}"
+  - dest: "{{ access_vpc_cidr }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  nat_route:
+    dest: 0.0.0.0/0
+    nat_gateway_id: "{{ vpc_nat_info.results | selectattr('subnet_id', 'equalto', nat_az2_pub_subnet_id) | map(attribute='nat_gateway_id') | join }}"
+  tags:
+    Name: "{{ env_name }} AZ2 Private RTB"
+    Application: Infrastructure
+    Network: Private
+    AZ: az2
+    Environment: "{{ env_name }}"
+
+#TODO: uncomment following block for non-cross-account peering ( or fix the role )
+- vpc_id: "{{ access_vpc_id }}"
+  purge_routes: no
+  routes:
+  - dest: 0.0.0.0/0
+    gateway_id: igw
+  - dest: "{{ vpc_cdir }}"
+    vpc_peering_connection_id: "{{ peer_info.results[0].peering_id }}"
+  tags:
+    Name: Security Subnet
+    Application: Infrastructure
+    Network: Security
+    AZ: all
+    Environment: all
+
+
+# Security Groups
+
+ops_access_sg: "{{ env_id }}-ops-access"
+internal_services_alb_sg: "{{ env_id }}-internal-services-alb"
+public_services_alb_sg: "{{ env_id }}-public-services-alb"
+website_instance_sg: "{{ env_id }}-website-instance"
+registry_instance_sg: "{{ env_id }}-registry-instance"
+nagios_ns_client_sg: "{{ env_id }}-nagios-ns-client"
+
+
+sg_list:
+- sg_name: "{{ ops_access_sg }}"
+  sg_description: Enable Ops Access
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Ops Access"
+    Application: Infrastructure
+    Network: Public
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 22
+    to_port: 22
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 443
+    to_port: 443
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 3389
+    to_port: 3389
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: udp
+    from_port: 3389
+    to_port: 3389
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 5985                              # WinRM-HTTP/HTTPS
+    to_port: 5986
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: icmp
+    from_port: -1
+    to_port: -1
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: icmp
+    from_port: -1
+    to_port: -1
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+  - proto: tcp
+    from_port: 22
+    to_port: 22
+    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+
+#- sg_name: "{{ public_services_alb_sg }}"
+#  sg_description: Public Services Application Balancer Group
+#  sg_vpc_id: "{{ vpc_id }}"
+#  sg_region: "{{ region }}"
+#  sg_state: "{{ state }}"
+#  sg_resource_tags:
+#    Name: "{{ env_name }} Public Services ALB"
+#    Application: Slice
+#    Network: Public
+#    Environment: "{{ env_name }}"
+#  sg_purge_rules: true
+#  sg_rules:
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    cidr_ip: "{% if restricted_access %}{{ slice_office_cidr }}{% else %}0.0.0.0/0{% endif %}"
+#  - proto: tcp
+#    from_port: 443
+#    to_port: 443
+#    cidr_ip: "{% if restricted_access %}{{ slice_office_cidr }}{% else %}0.0.0.0/0{% endif %}"
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    cidr_ip: "{{ slice_vpn_gw_cidr }}"
+#  - proto: tcp
+#    from_port: 443
+#    to_port: 443
+#    cidr_ip: "{{ slice_vpn_gw_cidr }}"
+#
+#
+#- sg_name: "{{ internal_services_alb_sg }}"
+#  sg_description: Internal services Application Balancer Group
+#  sg_vpc_id: "{{ vpc_id }}"
+#  sg_region: "{{ region }}"
+#  sg_state: "{{ state }}"
+#  sg_resource_tags:
+#    Name: "{{ env_name }} Internal services ALB"
+#    Application: Slice
+#    Network: Private
+#    Environment: "{{ env_name }}"
+#  sg_rules:
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 80
+#    to_port: 80
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_web_instance_sg) | map(attribute='group_id') | join() }}"
+
+#- sg_name: "{{ registry_lb_sg }}"
+#  sg_description: Private registry Load Balancer Group
+#  sg_vpc_id: "{{ vpc_id }}"
+#  sg_region: "{{ region }}"
+#  sg_state: "{{ state }}"
+#  sg_resource_tags:
+#    Name: "{{ env_name }} Private registry LB"
+#    Application: Slice
+#    Network: Database
+#    Environment: "{{ env_name }}"
+#  sg_rules:
+#  - proto: tcp
+#    from_port: 2113
+#    to_port: 2113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 1113
+#    to_port: 1113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', claims_instance_sg) | map(attribute='group_id') | join() }}"
+#
+#  - proto: tcp
+#    from_port: 2113
+#    to_port: 2113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 1113
+#    to_port: 1113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', product_instance_sg) | map(attribute='group_id') | join() }}"
+#
+#  - proto: tcp
+#    from_port: 2113
+#    to_port: 2113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 1113
+#    to_port: 1113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', uw_services_instance_sg) | map(attribute='group_id') | join() }}"
+#
+#  - proto: tcp
+#    from_port: 2113
+#    to_port: 2113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+#  - proto: tcp
+#    from_port: 1113
+#    to_port: 1113
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', idm_instance_sg) | map(attribute='group_id') | join() }}"
+#
+
+- sg_name: "{{ registry_instance_sg }}"
+  sg_description: Private Registry Instance Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Registry Instance"
+    Application: Slice
+    Network: Private
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 80
+    to_port: 80
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 5000
+    to_port: 5000
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 5050
+    to_port: 5050
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 5060
+    to_port: 5060
+    cidr_ip: "{{ access_vpc_cidr }}"
+#  - proto: tcp
+#    from_port: 5000
+#    to_port: 5000
+#    group_id: "{{ sg_init.results | selectattr('item.sg_name', 'equalto', registry_instance_sg) | map(attribute='group_id') | join() }}"
+
+- sg_name: "{{ nagios_ns_client_sg }}"
+  sg_description: Nagios Client Group
+  sg_vpc_id: "{{ vpc_id }}"
+  sg_region: "{{ region }}"
+  sg_state: "{{ state }}"
+  sg_resource_tags:
+    Name: "{{ env_name }} Nagios Client"
+    Application: Monitoring
+    Network: All
+    Environment: "{{ env_name }}"
+  sg_rules:
+  - proto: tcp
+    from_port: 5666
+    to_port: 5666
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: tcp
+    from_port: 12489
+    to_port: 12489
+    cidr_ip: "{{ access_vpc_cidr }}"
+  - proto: icmp
+    from_port: -1
+    to_port: -1
+    cidr_ip: "{{ access_vpc_cidr }}"
+
+
+# S3 buckets
+
+#application_buckets:
+#- bucket_name: "{{ env_id }}-lambdas"
+#- bucket_name: "{{ env_id }}-uploads"
+#- bucket_name: "{{ env_id }}-import-files"
+#- bucket_name: "{{ env_type }}-assets-open"
+#- bucket_name: "{{ env_type }}-assets-protected"
+#- bucket_name: 1-ops
+#  object: "/{{ env_id }}"
+
+# Lambda functions
+
+# none #
+
+
+# Load Balancers
+
+
+
+# External (Public) Application Load Balancer
+
+# Tag Group names
+
+pub_website_tg: "{{ env_id }}-pub-website-tg"
+pub_product_tg: "{{ env_id }}-pub-product-tg"
+pub_product_web_tg: "{{ env_id }}-pub-product-web-tg"
+pub_blackhole_tg: "{{ env_id }}-pub-blackhole-tg"
+
+public_services_lb:
+  name: "{{ env_id }}-public-services-alb"
+#  dns:
+#    host_name: "{{ env_id }}-services"
+#    zone: "{{ public_dns_zone }}"
+#    type: CNAME
+##    alias: true
+#    alias_hosted_zone_id: Z35SXDOTRQ7X7K
+#    ttl: 3600
+  subnets: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Public') | map(attribute='subnet.id') | list() }}"
+  security_groups:
+  - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', public_services_alb_sg) | map(attribute='group_id') | join() }}"
+  scheme: internet-facing
+  tags:
+  - Key: Name
+    Value: "{{ env_name }} Public Services ALB"
+  - Key: Application
+    Value: Slice
+  - Key: Network
+    Value: Public
+  - Key: Environment
+    Value: "{{ env_name }}"
+  listeners:
+  - protocol: https
+    port: 443
+    certificates:
+    - CertificateArn: "{{ ssl_certificate_arn }}"
+    rules:
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-api-int.slice.is{% else %}api.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/hs*'
+      priority: 10
+      target_group:
+        name: "{{ pub_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-wwww-int.slice.is{% else %}www.slice.is{% endif %}"
+      priority: 20
+      target_group:
+        name: "{{ pub_website_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-apps-int.slice.is{% else %}apps.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/*'
+      priority: 30
+      target_group:
+        name: "{{ pub_product_web_tg }}"
+        protocol: http
+        port: 80
+
+    - conditions:                   # default
+      priority: default
+      target_group:
+        name: "{{ pub_blackhole_tg }}"
+        protocol: http
+        port: 80
+
+  - protocol: http
+    port: 80
+    rules:
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{{ env_id }}-api-int.slice.is"
+      - Field: path-pattern
+        Values:
+        - '/hs*'
+      priority: 10
+      target_group:
+        name: "{{ pub_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{{ env_id }}-wwww-int.slice.is"
+      priority: 20
+      target_group:
+        name: "{{ pub_website_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: host-header
+        Values:
+        - "{% if restricted_access %}{{ env_id }}-apps-int.slice.is{% else %}apps.slice.is{% endif %}"
+      - Field: path-pattern
+        Values:
+        - '/*'
+      priority: 30
+      target_group:
+        name: "{{ pub_product_web_tg }}"
+        protocol: http
+        port: 80
+
+    - conditions:                   # default
+      priority: default
+      target_group:
+        name: "{{ pub_blackhole_tg }}"
+        protocol: http
+        port: 80
+
+
+# Internal (Private) Application Load Balancer
+
+# Target Group names
+
+int_product_tg: "{{ env_id }}-int-product-tg"
+int_idm_tg: "{{ env_id }}-int-idm-tg"
+int_uw_services_tg: "{{ env_id }}-int-uw-services-tg"
+int_claims_tg: "{{ env_id }}-claims-tg"
+
+internal_services_lb:
+  name: "{{ env_id }}-internal-services-alb"
+#  dns:
+#    host_name: "{{ env_id }}-services"
+#    zone: "{{ private_dns_zone }}"
+#    private_zone: true
+#    alias: true
+#    alias_hosted_zone_id: Z35SXDOTRQ7X7K
+#    ttl: 3600
+  subnets: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | list() }}"
+  security_groups:
+  - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', internal_services_alb_sg) | map(attribute='group_id') | join() }}"
+  scheme: internal
+  tags:
+  - Key: Name
+    Value: "{{ env_name }} Internal services ALB"
+  - Key: Application
+    Value: Slice
+  - Key: Network
+    Value: Private
+  - Key: Environment
+    Value: "{{ env_name }}"
+  listeners:
+  - protocol: http
+    port: 80
+    rules:
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/hs-int/*'
+      priority: 10
+      target_group:
+        name: "{{ int_product_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/idm-int/*'
+      priority: 20
+      target_group:
+        name: "{{ int_idm_tg }}"
+        protocol: http
+        port: 80
+    - conditions:
+      - Field: path-pattern
+        Values:
+        - '/claims-int/*'
+      priority: 30
+      target_group:
+        name: "{{ int_claims_tg }}"
+        protocol: http
+        port: 80
+    - conditions:                   # default
+#      - Field: path-pattern
+#        Values:
+#        - '/weather/*; /sdn/*; /rce/*'
+      priority: default
+      target_group:
+        name: "{{ int_uw_services_tg }}"
+        protocol: http
+        port: 80
+
+
+
+# Registry instance/cluster
+
+registry_scaling_group:
+  ami:
+    id: "{{ registry_ami | default(omit) }}"
+    name: registry-image
+    instance_id: "{{ instance_id | default(omit) }}"
+    wait: true
+  name: "{{ env_id }}-registry-scaling"
+  launch_config:
+    instance_type: "{{ registry_instance_type }}"
+    security_groups:
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', registry_instance_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', ops_access_sg) | map(attribute='group_id') | join() }}"
+    - "{{ sg_init.results | selectattr('item.sg_name', 'equalto', nagios_ns_client_sg) | map(attribute='group_id') | join() }}"
+    instance_profile_name: Deploy-Slice-Core-EC2
+#    user_data:
+    assign_public_ip: false
+    instance_monitoring: "{{ detailed_monitoring | default (false) }}"
+    key_name: "{{ registry_keypair }}"
+
+  auto_scaling_group:
+    min_size: "{{ registry_inst_min | default(0) }}"
+    max_size: "{{ registry_inst_max  | default(4) }}"
+    desired_capacity: "{{ registry_inst_desired | default(registry_inst_min) }}"
+    health_check_type: EC2
+    health_check_period: 300
+    suspend_processes:
+    - Terminate
+    - AZRebalance
+    - ReplaceUnhealthy
+    vpc_zone_identifier: "{{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | join(', ') }}"
+    tags:
+    - {'Key': 'Name', 'Value': '{{ env_name }} Registry'}
+    - {'Key': 'Application', 'Value': 'Docker'}
+    - {'Key': 'Network', 'Value': 'Private'}
+    - {'Key': 'Environment', 'Value': '{{ env_name }}'}

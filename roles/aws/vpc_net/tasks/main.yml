@@ -1,0 +1,68 @@
+---
+- name: Create AWS VPC
+  ec2_vpc_net:
+    state: "{{vpc_net.vpc_state}}"
+    name: "{{ vpc_net.vpc_name }}"
+    cidr_block: "{{vpc_net.vpc_cidr_block}}"
+    region: "{{vpc_net.vpc_region}}"
+    tags: "{{vpc_net.vpc_resource_tags}}"
+    dns_support: "{{vpc_net.vpc_dns_support}}"
+    dns_hostnames: "{{vpc_net.vpc_dns_hostnames}}"
+  register: vpc_info
+
+- name: set VPC ID
+  set_fact: vpc_id={{ vpc_info.vpc.id }}
+
+- name: Create VPC subnets
+  ec2_vpc_subnet:
+    state: "{{vpc_net.vpc_state}}"
+    region: "{{vpc_net.vpc_region}}"
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ item.cidr }}"
+    az: "{{ item.az | default(omit) }}"
+    resource_tags: "{{ item.resource_tags | default(omit) }}"
+  register: vpc_subnet_info
+  with_items: "{{ vpc_net.vpc_subnets }}"
+
+- name: Create Internet Gateway (IGW)
+  ec2_vpc_igw:
+    vpc_id: "{{ vpc_id }}"
+    state: "{{vpc_net.vpc_state}}"
+    region: "{{vpc_net.vpc_region}}"
+  when: vpc_net.vpc_internet_gateway is defined and vpc_net.vpc_internet_gateway
+
+- name: Get temp routing table facts to get Main routing table ID
+  ec2_vpc_route_table_facts:
+    region: "{{vpc_net.vpc_region}}"
+    filters:
+      vpc-id: "{{ vpc_id }}"
+  register: rt_info
+
+#- debug:
+#    msg: "{{ vpc_subnet_info }}"
+
+- name: Add tags to Main routing table
+  ec2_tag:
+    resource: "{{ item.associations[0].route_table_id }}"
+    region: "{{vpc_net.vpc_region}}"
+    state: "{{vpc_net.vpc_state}}"
+    tags: "{{ vpc_net.vpc_main_route_tags }}"
+  with_items: "{{ rt_info.route_tables }}"
+  when: item.associations[0].main == true
+
+
+- set_fact: az1_subnet_ids={{ vpc_subnet_info.results | selectattr('subnet.availability_zone', 'equalto', az1) | map(attribute='subnet.id') | list }}
+- set_fact: az2_subnet_ids={{ vpc_subnet_info.results | selectattr('subnet.availability_zone', 'equalto', az2) | map(attribute='subnet.id') | list }}
+- set_fact: public_subnet_ids={{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Public') | map(attribute='subnet.id') | list }}
+- set_fact: private_subnet_ids={{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Private') | map(attribute='subnet.id') | list }}
+- set_fact: db_subnet_ids={{ vpc_subnet_info.results | selectattr('subnet.tags.Network', 'equalto', 'Database') | map(attribute='subnet.id') | list }}
+
+- set_fact: az1_private_subnet_ids={{  private_subnet_ids | union(db_subnet_ids) | intersect(az1_subnet_ids) }}
+- set_fact: az2_private_subnet_ids={{  private_subnet_ids | union(db_subnet_ids) | intersect(az2_subnet_ids) }}
+
+- set_fact: az1_public_subnet_id={{  public_subnet_ids | intersect(az1_subnet_ids) | first }}
+- set_fact: az2_public_subnet_id={{  public_subnet_ids | intersect(az2_subnet_ids) | first }}
+
+
+
+

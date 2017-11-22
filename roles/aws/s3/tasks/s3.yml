@@ -1,0 +1,48 @@
+---
+
+- name: Create S3 Bucket for Portal and Documentation
+  local_action:
+    module: s3
+    region: "{{ region }}"
+    bucket: "{{ item.bucket_name }}"
+    object: "{{ item.object | default(omit) }}"
+    mode: create
+  with_items:
+    - "{{ aws_s3 }}"
+
+#- name: Create S3 Bucket
+#  command: "aws s3 mb s3://{{ item.bucket_name }}"
+#  ignore_errors: yes
+#  tags:
+#    - s3
+#    - s3-create
+#  with_items: "{{ aws_s3 }}"
+
+- name: debug02
+  debug: msg="{{ item }}"
+  with_items: "{{ aws_s3 }}"
+
+- name: Set S3 Website Config
+  shell: "aws s3 website s3://{{ item.bucket_name }}/ --index-document {{ s3_website_index_document }} --error-document {{ s3_website_error_document }}"
+  with_items: "{{ aws_s3 }}"
+
+#- name: Upload Static Site to S3
+#  command: "aws s3 cp {{ s3_website_directory }} s3://www.{{ s3_website_domain }}/ --recursive"
+#  tags:
+#    - s3
+#    - s3-sync
+
+- name: debug03
+  debug: msg="{{ s3_website_bucket_policy | to_json }}"
+
+- name: Set Bucket Policy for S3
+  command: "aws s3api put-bucket-policy --bucket {{ item.bucket_name }} --policy '{{ s3_website_bucket_policy | to_json }}'"
+  tags:
+    - s3
+  with_items: "{{ aws_s3 }}"
+
+#- name: Set S3 Website Config
+#  local_action:
+#    command: "aws s3 website s3://www.{{ item.bucket_name }}/ --index-document {{ s3_website_index_document }} --error-document {{ s3_website_error_document }}"
+#  with_items:
+#    - "{{ aws_s3 }}"

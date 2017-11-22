@@ -1,0 +1,5 @@
+---
+- assert:
+    that:
+    - "vpc_id is defined"
+    msg: "Error! The virtual private cloud was not created."

@@ -1,0 +1,46 @@
+{
+  "CallerReference": "my-distribution-2015-09-01",
+  "Aliases": {
+    "Quantity": 0
+  },
+  "DefaultRootObject": "index.html",
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "my-origin",
+        "DomainName": "www.airsembly-ops01.com.s3.amazonaws.com",
+        "S3OriginConfig": {
+          "OriginAccessIdentity": ""
+        }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "my-origin",
+    "ForwardedValues": {
+      "QueryString": true,
+      "Cookies": {
+        "Forward": "none"
+      }
+    },
+    "TrustedSigners": {
+      "Enabled": false,
+      "Quantity": 0
+    },
+    "ViewerProtocolPolicy": "allow-all",
+    "MinTTL": 3600
+  },
+  "CacheBehaviors": {
+    "Quantity": 0
+  },
+  "Comment": "",
+  "Logging": {
+    "Enabled": false,
+    "IncludeCookies": true,
+    "Bucket": "",
+    "Prefix": ""
+  },
+  "PriceClass": "PriceClass_All",
+  "Enabled": true
+}

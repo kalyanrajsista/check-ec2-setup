@@ -1,0 +1,13 @@
+---
+# vars file for website
+website_user: "{{ ansible_ssh_user }}"
+website_venv_home: "{{ ansible_env.HOME }}"
+website_venv_path: "{{ website_venv_home }}/{{ proj_name }}"
+website_repo_url: https://github.com/pjodouin/ivcs-cms.git
+website_proj_dirname: project
+website_proj_path: "{{ website_venv_path }}/{{ website_proj_dirname }}"
+website_reqs_path: requirements.txt
+website_conf_path: /etc/nginx/conf
+website_python: "{{ website_venv_path }}/bin/python"
+website_manage: "{{ website_python }} {{ website_proj_path }}/manage.py"
+website_gunicorn_port: 8000
